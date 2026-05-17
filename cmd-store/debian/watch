@@ -1,0 +1,2 @@
+version=4
+https://github.com/ceeejeey/cmdstr/tags .*/v?(\d\S+)\.tar\.gz

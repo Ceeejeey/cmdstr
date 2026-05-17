@@ -1,0 +1,26 @@
+Source: cmdstr
+Section: utils
+Priority: optional
+Maintainer: Gihan Vimukthi <gihanvimukthi19@gmail.com>
+Build-Depends: debhelper-compat (= 13), dh-cargo (>= 25), cargo, rustc
+Standards-Version: 4.6.2
+Homepage: https://github.com/ceeejeey/cmdstr
+Vcs-Git: https://github.com/ceeejeey/cmdstr.git
+Vcs-Browser: https://github.com/ceeejeey/cmdstr
+
+Package: cmdstr
+Architecture: any
+Depends: ${misc:Depends}, ${shlibs:Depends}
+Description: Smart command storage and recall for the terminal
+ cmdstr automatically captures every command you run in the
+ terminal, then lets you search, tag, annotate, and browse your
+ command history with ease.
+ .
+ Features:
+  - Auto-capture: every command, exit code, duration, and cwd
+  - Full-text search with tag and date filtering
+  - Tag and annotate commands for easy recall
+  - Bookmark your favorites
+  - Stats and frequency analysis
+  - JSON and CSV export
+  - Run tagged commands directly

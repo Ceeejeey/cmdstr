@@ -1,0 +1,46 @@
+[package]
+name = "cmdstr"
+version = "0.1.0"
+edition = "2021"
+description = "Smart command storage and recall for the terminal"
+authors = ["Gihan Vimukthi <gihanvimukthi19@gmail.com>"]
+license = "MIT"
+repository = "https://github.com/ceeejeey/cmdstr"
+
+[lib]
+name = "cmd_store"
+
+[package.metadata.deb]
+maintainer = "Gihan Vimukthi <gihanvimukthi19@gmail.com>"
+copyright = "2026, Gihan Vimukthi <gihanvimukthi19@gmail.com>"
+license-file = ["LICENSE", "2"]
+section = "utils"
+priority = "optional"
+extended-description = """\
+cmdstr automatically captures every command you run in the terminal,
+then lets you search, tag, annotate, and browse your command history
+with ease. Never forget that complicated ffmpeg incantation again.
+
+Features:
+ - Auto-capture: every command, exit code, duration, and working directory
+ - Full-text search with tag and date filtering
+ - Tag and annotate commands for easy recall
+ - Bookmark your favorites
+ - Stats and frequency analysis
+ - JSON and CSV export
+ - Run tagged commands directly from the terminal
+"""
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+rusqlite = { version = "0.31", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1"
+thiserror = "1"
+ulid = "1"
+dirs = "5"
+whoami = "1"
+ratatui = "0.28"
+crossterm = "0.28"
