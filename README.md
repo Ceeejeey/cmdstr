@@ -237,21 +237,70 @@ cmdstr tui
 
 Launches a hacker-themed terminal UI for browsing, searching, running, tagging, and managing your command history interactively.
 
+#### Navigation & Selection
+
 | Key | Action |
 |-----|--------|
 | `↑` / `↓` or `j` / `k` | Navigate command list |
-| `Enter` | Run the selected command |
-| `r` | Type and run an arbitrary command |
-| `/` | Search / filter commands |
-| `t` | Tag the selected command |
-| `n` | Add a note to the selected command |
-| `b` | Toggle bookmark |
-| `d` | Delete the selected command |
 | `g` | Go to top of list |
 | `G` | Go to bottom of list |
+| `Ctrl+↑` / `Ctrl+↓` | Scroll output up / down |
+| `PageUp` / `PageDown` | Scroll output by 5 lines |
+
+Commands are displayed one per line with a `▸` pointer on the selected entry, a `✓`/`✗` status indicator, and a `★` bookmark marker.
+
+#### Running Commands
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Run the selected command |
+| `r` | Type and run an arbitrary command |
+| `S` | Toggle **sudo mode** (red theme, all commands prefixed with `sudo`) |
+
+Commands run in a real PTY via `script(1)` — interactive prompts (like `apt upgrade`) work fully, and all output is captured and displayed in the output panel for review after the command finishes.
+
+#### Sudo & Password Popup
+
+When sudo mode is toggled (`S`), the UI switches to a **red-on-black hacker theme**. Pressing `Enter` on a command while in sudo mode:
+
+1. **Caches sudo credentials** via `sudo -S -v` (password sent over a secure pipe)
+2. Runs the command with full `sudo` privileges
+3. Captures the output for display
+
+The password popup uses masked input (`••••`) and never echoes the password to the terminal.
+
+#### Managing Commands
+
+| Key | Action |
+|-----|--------|
+| `/` or `s` | Search / filter commands |
+| `t` | Tag the selected command |
+| `n` / `a` | Add a note to the selected command |
+| `b` | Toggle bookmark (`★`) |
+| `d` | Delete the selected command |
+| `w` | Manually add a command to the store |
+
+#### Quitting
+
+| Key | Action |
+|-----|--------|
 | `q` / `Esc` / `Ctrl+C` | Quit the TUI |
 
-The TUI uses a **green-on-black** hacker theme and runs commands right in the terminal so you can see output without leaving the UI. All actions (tagging, notes, bookmarks, deletions) are saved immediately to the database.
+#### How Command Execution Works
+
+The TUI fully suspends itself before running external commands:
+
+1. Leaves the alternate screen buffer
+2. Disables raw mode (restores normal terminal settings)
+3. Shows the cursor
+4. Runs the command inside `script(1)` — preserves interactivity AND captures output
+5. Runs `stty sane` to reset any terminal state changes from the command
+6. Re-enters the alternate screen, re-enables raw mode, hides the cursor
+7. Displays captured output in the output panel
+
+This approach handles everything from simple commands (`echo hello`) to complex interactive sessions (`apt upgrade`, `vim`, `htop`) without crashing or corrupting the TUI.
+
+All actions (tagging, notes, bookmarks, deletions) are saved immediately to the SQLite database.
 
 ---
 

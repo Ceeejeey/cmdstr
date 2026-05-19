@@ -55,7 +55,7 @@ fn detect_shell() -> String {
     std::env::var("SHELL")
         .unwrap_or_default()
         .split('/')
-        .last()
+        .next_back()
         .unwrap_or("bash")
         .to_string()
 }

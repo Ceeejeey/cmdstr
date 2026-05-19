@@ -1,6 +1,7 @@
 use crate::config::paths;
 use crate::db::schema;
 use anyhow::{Context, Result};
+use crossterm::cursor;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::ExecutableCommand;
@@ -26,11 +27,13 @@ pub struct CommandInfo {
 
 #[derive(Clone, PartialEq)]
 pub enum InputMode {
-    Normal,
-    Command,
+    Tool,
+    Run,
     Search,
     Tag,
     Note,
+    Password,
+    Add,
 }
 
 pub struct App {
@@ -44,7 +47,18 @@ pub struct App {
     pub status_msg: String,
     pub list_scroll: usize,
     pub output_scroll: u16,
+    pub sudo_mode: bool,
+    pub password: String,
+    pub show_password_popup: bool,
+    pub mode_msg: String,
+    pending_run: Option<PendingRun>,
+    pub list_inner_height: usize,
     conn: Connection,
+}
+
+struct PendingRun {
+    command: String,
+    password: Option<String>,
 }
 
 impl App {
@@ -58,12 +72,18 @@ impl App {
             filtered: Vec::new(),
             selected: 0,
             input: String::new(),
-            mode: InputMode::Normal,
+            mode: InputMode::Tool,
             output: String::new(),
             should_quit: false,
             status_msg: String::new(),
             list_scroll: 0,
             output_scroll: 0,
+            sudo_mode: false,
+            password: String::new(),
+            show_password_popup: false,
+            mode_msg: String::new(),
+            pending_run: None,
+            list_inner_height: 0,
             conn,
         };
         app.load_commands()?;
@@ -119,27 +139,6 @@ impl App {
         self.filtered.get(self.selected).and_then(|&i| self.commands.get(i))
     }
 
-    fn run_shell(cmd: &str) -> Result<String> {
-        let output = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(cmd)
-            .output()
-            .context("failed to execute command")?;
-
-        let mut result = String::new();
-        if !output.stdout.is_empty() {
-            result.push_str(&String::from_utf8_lossy(&output.stdout));
-        }
-        if !output.stderr.is_empty() {
-            if !result.is_empty() { result.push('\n'); }
-            result.push_str(&String::from_utf8_lossy(&output.stderr));
-        }
-        if !output.status.success() {
-            result.push_str(&format!("\n[exit code: {}]", output.status.code().unwrap_or(-1)));
-        }
-        Ok(result)
-    }
-
     fn reload_and_select(&mut self, _idx: usize) -> Result<()> {
         self.load_commands()?;
         self.selected = self.selected.min(self.filtered.len().saturating_sub(1));
@@ -154,30 +153,119 @@ impl App {
         Ok(())
     }
 
-    fn run_command(cmd: &str) -> Result<String> {
-        let output = Self::run_shell(cmd)?;
-        if let Err(e) = Self::capture_output(cmd) {
-            eprintln!("Failed to capture: {e}");
+    fn run_shell_suspended(
+        cmd: &str,
+        password: Option<&str>,
+    ) -> Result<(String, i32)> {
+        if let Some(pw) = password {
+            let mut auth = std::process::Command::new("sudo")
+                .arg("-S")
+                .arg("-v")
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .context("failed to spawn sudo -v")?;
+            if let Some(mut stdin) = auth.stdin.take() {
+                let _ = writeln!(stdin, "{}", pw);
+            }
+            auth.wait()?;
         }
-        Ok(output)
+
+        match Self::run_with_script(cmd) {
+            Ok(result) => Ok(result),
+            Err(_) => {
+                let status = std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(cmd)
+                    .stdin(std::process::Stdio::inherit())
+                    .stdout(std::process::Stdio::inherit())
+                    .stderr(std::process::Stdio::inherit())
+                    .status()
+                    .context("failed to execute command")?;
+                let code = status.code().unwrap_or(-1);
+                Ok((format!("[exit code: {}]", code), code))
+            }
+        }
+    }
+
+    fn run_with_script(cmd: &str) -> Result<(String, i32)> {
+        let out_dir = std::env::temp_dir();
+        let out_path = out_dir.join(format!("cmdstr_out_{}", std::process::id()));
+        let out_str = out_path.to_str().context("invalid temp path")?;
+
+        let status = std::process::Command::new("script")
+            .args(["-q", "-e", "-c", cmd, out_str])
+            .stdin(std::process::Stdio::inherit())
+            .status()
+            .context("script command failed")?;
+
+        let recorded = match std::fs::read_to_string(&out_path) {
+            Ok(s) => {
+                let _ = std::fs::remove_file(&out_path);
+                s
+            }
+            Err(_) => String::new(),
+        };
+
+        let clean: String = recorded.chars().filter(|&c| c != '\r').collect();
+        let output = Self::strip_script_header(&clean);
+
+        let code = status.code().unwrap_or(-1);
+        Ok((output, code))
+    }
+
+    fn strip_script_header(s: &str) -> String {
+        let mut lines: Vec<&str> = s.lines().collect();
+        if lines.first().is_some_and(|l| l.contains("Script started")) {
+            lines.remove(0);
+        }
+        if lines.last().is_some_and(|l| l.contains("Script done")) {
+            lines.pop();
+        }
+        lines.join("\n")
     }
 
     pub fn run_selected(&mut self) -> Result<()> {
         let cmd_str = self.selected_command().map(|c| c.command.clone());
         if let Some(cmd) = cmd_str {
-            self.output = Self::run_shell(&cmd)?;
-            self.status_msg = format!("Ran: {}", &cmd);
-            self.output_scroll = 0;
+            let effective_cmd = if self.sudo_mode && !cmd.starts_with("sudo ") {
+                format!("sudo {}", cmd)
+            } else {
+                cmd.clone()
+            };
+
+            if effective_cmd.starts_with("sudo ") {
+                self.mode = InputMode::Password;
+                self.input = effective_cmd;
+                self.password.clear();
+                self.show_password_popup = true;
+                self.mode_msg = "PASSWORD".to_string();
+                return Ok(());
+            }
+
+            self.pending_run = Some(PendingRun { command: effective_cmd, password: None });
         }
         Ok(())
     }
 
     pub fn run_input_cmd(&mut self, cmd: &str) -> Result<()> {
-        let output = Self::run_command(cmd)?;
-        self.output = output;
-        self.status_msg = format!("Ran: {cmd}");
-        self.output_scroll = 0;
-        self.reload_and_select(0)?;
+        let effective_cmd = if self.sudo_mode && !cmd.starts_with("sudo ") {
+            format!("sudo {}", cmd)
+        } else {
+            cmd.to_string()
+        };
+
+        if effective_cmd.starts_with("sudo ") {
+            self.mode = InputMode::Password;
+            self.input = effective_cmd;
+            self.password.clear();
+            self.show_password_popup = true;
+            self.mode_msg = "PASSWORD".to_string();
+            return Ok(());
+        }
+
+        self.pending_run = Some(PendingRun { command: effective_cmd, password: None });
         Ok(())
     }
 
@@ -272,6 +360,19 @@ impl App {
         self.status_msg = format!("{} matches", self.filtered.len());
     }
 
+    fn scroll_output(&mut self, delta: i16) {
+        let max = self.output_line_count().saturating_sub(1);
+        let new_scroll = (self.output_scroll as i16 + delta).max(0).min(max as i16);
+        self.output_scroll = new_scroll as u16;
+    }
+
+    pub fn output_line_count(&self) -> u16 {
+        if self.output.is_empty() {
+            return 0;
+        }
+        self.output.lines().count() as u16
+    }
+
     pub fn run(&mut self) -> Result<()> {
         enable_raw_mode()?;
         let mut stdout = stdout();
@@ -283,12 +384,73 @@ impl App {
         let tick_rate = Duration::from_millis(50);
 
         while !self.should_quit {
-            terminal.draw(|f| ui::render(f, &self))?;
+                // Execute any pending command with TUI suspend/resume
+            if let Some(run) = self.pending_run.take() {
+                // Suspend the TUI
+                let mut suspend = || -> Result<()> {
+                    disable_raw_mode()?;
+                    terminal.backend_mut().execute(LeaveAlternateScreen)?;
+                    terminal.backend_mut().execute(cursor::Show)?;
+                    terminal.backend_mut().flush()?;
+                    Ok(())
+                };
+                if let Err(e) = suspend() {
+                    self.status_msg = format!("Suspend error: {e}");
+                    // Try to recover
+                    let _ = enable_raw_mode();
+                    let _ = terminal.backend_mut().execute(EnterAlternateScreen);
+                }
+
+                // Run the command with the real terminal
+                let (output, exit_code) = Self::run_shell_suspended(
+                    &run.command,
+                    run.password.as_deref(),
+                ).unwrap_or_else(|e| (format!("Error: {e}"), -1));
+
+                // Capture to DB
+                if let Err(e) = Self::capture_output(&run.command) {
+                    eprintln!("Failed to capture: {e}");
+                }
+
+                // Reset terminal to a known good state
+                let _ = std::process::Command::new("stty").arg("sane").status();
+
+                // Re-enter the TUI
+                let mut resume = || -> Result<()> {
+                    enable_raw_mode()?;
+                    terminal.backend_mut().execute(EnterAlternateScreen)?;
+                    terminal.backend_mut().execute(cursor::Hide)?;
+                    terminal.clear()?;
+                    Ok(())
+                };
+                if let Err(e) = resume() {
+                    self.status_msg = format!("Resume error: {e}");
+                    self.should_quit = true;
+                }
+
+                // Update state
+                self.output = output;
+                self.status_msg = format!("Command exited: {}", exit_code);
+                self.output_scroll = 0;
+                if let Err(e) = self.reload_and_select(0) {
+                    eprintln!("Failed to reload: {e}");
+                }
+            }
+
+            let _ = terminal.draw(|f| ui::render(f, self));
 
             if event::poll(tick_rate)? {
                 match self.mode.clone() {
-                    InputMode::Normal => self.handle_normal_event(event::read()?)?,
-                    _ => self.handle_input_event(event::read()?)?,
+                    InputMode::Tool => {
+                        if let Err(e) = self.handle_tool_event(event::read()?) {
+                            self.status_msg = format!("Error: {e}");
+                        }
+                    }
+                    _ => {
+                        if let Err(e) = self.handle_input_event(event::read()?) {
+                            self.status_msg = format!("Error: {e}");
+                        }
+                    }
                 }
             }
         }
@@ -299,7 +461,7 @@ impl App {
         Ok(())
     }
 
-    fn handle_normal_event(&mut self, ev: Event) -> Result<()> {
+    fn handle_tool_event(&mut self, ev: Event) -> Result<()> {
         if let Event::Key(KeyEvent { code, kind, modifiers, .. }) = ev {
             if kind != KeyEventKind::Press && kind != KeyEventKind::Repeat {
                 return Ok(());
@@ -308,52 +470,71 @@ impl App {
             match code {
                 KeyCode::Char('q') if modifiers == KeyModifiers::NONE => self.should_quit = true,
                 KeyCode::Char('c') if modifiers == KeyModifiers::CONTROL => self.should_quit = true,
-                KeyCode::Esc => self.should_quit = true,
 
-                KeyCode::Char('j') | KeyCode::Down => {
-                    if self.selected + 1 < self.filtered.len() {
+                KeyCode::Char('j') | KeyCode::Down
+                    if self.selected + 1 < self.filtered.len() => {
                         self.selected += 1;
                         self.ensure_visible();
                     }
-                }
-                KeyCode::Char('k') | KeyCode::Up => {
-                    if self.selected > 0 {
+                KeyCode::Char('k') | KeyCode::Up
+                    if self.selected > 0 => {
                         self.selected -= 1;
                         self.ensure_visible();
                     }
-                }
                 KeyCode::Char('g') => { self.selected = 0; self.list_scroll = 0; }
                 KeyCode::Char('G') => {
                     self.selected = self.filtered.len().saturating_sub(1);
                     self.list_scroll = self.filtered.len().saturating_sub(1);
                 }
 
-                KeyCode::Enter => self.run_selected()?,
-
                 KeyCode::Char('r') => {
                     self.input.clear();
-                    self.mode = InputMode::Command;
+                    self.mode_msg = "RUN".to_string();
+                    self.mode = InputMode::Run;
                 }
-                KeyCode::Char('/') => {
+                KeyCode::Char('w') => {
                     self.input.clear();
+                    self.mode_msg = "ADD".to_string();
+                    self.mode = InputMode::Add;
+                }
+                KeyCode::Char('/') | KeyCode::Char('s') => {
+                    self.input.clear();
+                    self.mode_msg = "SEARCH".to_string();
                     self.mode = InputMode::Search;
                 }
-                KeyCode::Char('t') => {
-                    if self.selected_command().is_some() {
+                KeyCode::Char('t')
+                    if self.selected_command().is_some() => {
                         let tags = self.selected_command().map(|c| c.tags.join(", ")).unwrap_or_default();
                         self.input = tags;
+                        self.mode_msg = "TAG".to_string();
                         self.mode = InputMode::Tag;
                     }
-                }
-                KeyCode::Char('n') => {
-                    if self.selected_command().is_some() {
+                KeyCode::Char('n') | KeyCode::Char('a')
+                    if self.selected_command().is_some() => {
                         let note = self.selected_command().and_then(|c| c.note.clone()).unwrap_or_default();
                         self.input = note;
+                        self.mode_msg = "NOTE".to_string();
                         self.mode = InputMode::Note;
                     }
-                }
                 KeyCode::Char('b') => self.toggle_bookmark()?,
                 KeyCode::Char('d') => self.delete_command()?,
+
+                KeyCode::Char('S') | KeyCode::Char('U') => {
+                    self.sudo_mode = !self.sudo_mode;
+                    self.status_msg = if self.sudo_mode {
+                        "SUDO MODE ON — all commands run as root".to_string()
+                    } else {
+                        "SUDO MODE OFF".to_string()
+                    };
+                }
+
+                KeyCode::Enter => self.run_selected()?,
+
+                // Output scrolling
+                KeyCode::Up if modifiers == KeyModifiers::CONTROL => self.scroll_output(-1),
+                KeyCode::Down if modifiers == KeyModifiers::CONTROL => self.scroll_output(1),
+                KeyCode::PageUp => self.scroll_output(-5),
+                KeyCode::PageDown => self.scroll_output(5),
 
                 _ => {}
             }
@@ -369,31 +550,52 @@ impl App {
 
             match code {
                 KeyCode::Esc => {
-                    self.mode = InputMode::Normal;
+                    self.mode = InputMode::Tool;
+                    self.mode_msg.clear();
                     self.input.clear();
+                    self.password.clear();
+                    self.show_password_popup = false;
                 }
                 KeyCode::Enter => {
                     let input = self.input.trim().to_string();
                     let mode = self.mode.clone();
-                    self.mode = InputMode::Normal;
+                    self.mode = InputMode::Tool;
+                    self.mode_msg.clear();
 
                     match mode {
-                        InputMode::Command => {
-                            if !input.is_empty() {
+                        InputMode::Run
+                            if !input.is_empty() => {
                                 self.run_input_cmd(&input)?;
                             }
-                        }
                         InputMode::Search => {
                             self.search(&input);
                         }
-                        InputMode::Tag => {
-                            if !input.is_empty() {
+                        InputMode::Tag
+                            if !input.is_empty() => {
                                 self.set_tags(&input)?;
                             }
-                        }
-                        InputMode::Note => {
-                            if !input.is_empty() {
+                        InputMode::Note
+                            if !input.is_empty() => {
                                 self.set_note(&input)?;
+                            }
+                        InputMode::Add
+                            if !input.is_empty() => {
+                                if let Err(e) = crate::capture::capture_command(&input, 0, 0, "", "tui") {
+                                    self.status_msg = format!("Failed to add: {e}");
+                                } else {
+                                    self.status_msg = format!("Added: {}", &input);
+                                    self.reload_and_select(0)?;
+                                }
+                            }
+                        InputMode::Password => {
+                            let pw = std::mem::take(&mut self.password);
+                            self.show_password_popup = false;
+                            if !pw.is_empty() && !input.is_empty() {
+                                self.pending_run = Some(PendingRun {
+                                    command: input,
+                                    password: Some(pw),
+                                });
+                                self.status_msg = "Starting...".to_string();
                             }
                         }
                         _ => {}
@@ -401,10 +603,18 @@ impl App {
                     self.input.clear();
                 }
                 KeyCode::Char(c) => {
-                    self.input.push(c);
+                    if self.mode == InputMode::Password {
+                        self.password.push(c);
+                    } else {
+                        self.input.push(c);
+                    }
                 }
                 KeyCode::Backspace => {
-                    self.input.pop();
+                    if self.mode == InputMode::Password {
+                        self.password.pop();
+                    } else {
+                        self.input.pop();
+                    }
                 }
                 _ => {}
             }
@@ -413,7 +623,7 @@ impl App {
     }
 
     fn ensure_visible(&mut self) {
-        let list_height = 10usize;
+        let list_height = self.list_inner_height.max(1);
         if self.selected < self.list_scroll {
             self.list_scroll = self.selected;
         } else if self.selected >= self.list_scroll + list_height {
