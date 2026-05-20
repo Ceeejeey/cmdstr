@@ -38,9 +38,43 @@ pub fn capture_command(
     Ok(id)
 }
 
-fn simple_hash(s: &str) -> String {
+pub(crate) fn simple_hash(s: &str) -> String {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     s.hash(&mut hasher);
     hasher.finish().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_simple_hash_deterministic() {
+        assert_eq!(simple_hash("hello"), simple_hash("hello"));
+    }
+
+    #[test]
+    fn test_simple_hash_differs_for_diff_inputs() {
+        assert_ne!(simple_hash("hello"), simple_hash("world"));
+    }
+
+    #[test]
+    fn test_simple_hash_empty_string() {
+        let h = simple_hash("");
+        assert!(!h.is_empty());
+    }
+
+    #[test]
+    fn test_simple_hash_different_casing_differs() {
+        assert_ne!(simple_hash("Docker"), simple_hash("docker"));
+    }
+
+    #[test]
+    fn test_simple_hash_repeatable() {
+        assert_eq!(
+            simple_hash("echo hello"),
+            simple_hash("echo hello")
+        );
+    }
 }

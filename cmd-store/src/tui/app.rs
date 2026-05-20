@@ -46,10 +46,11 @@ pub struct App {
     pub should_quit: bool,
     pub status_msg: String,
     pub list_scroll: usize,
-    pub output_scroll: u16,
+    pub output_scroll: usize,
     pub sudo_mode: bool,
     pub password: String,
     pub show_password_popup: bool,
+    pub show_help: bool,
     pub mode_msg: String,
     pending_run: Option<PendingRun>,
     pub list_inner_height: usize,
@@ -81,6 +82,7 @@ impl App {
             sudo_mode: false,
             password: String::new(),
             show_password_popup: false,
+            show_help: false,
             mode_msg: String::new(),
             pending_run: None,
             list_inner_height: 0,
@@ -208,7 +210,7 @@ impl App {
             Err(_) => String::new(),
         };
 
-        let clean: String = recorded.chars().filter(|&c| c != '\r').collect();
+        let clean = Self::clean_terminal_output(&recorded);
         let output = Self::strip_script_header(&clean);
 
         let code = status.code().unwrap_or(-1);
@@ -224,6 +226,57 @@ impl App {
             lines.pop();
         }
         lines.join("\n")
+    }
+
+    fn clean_terminal_output(s: &str) -> String {
+        let mut result = String::new();
+        let mut in_escape = false;
+        let mut is_csi = false;
+        let mut current_line = String::new();
+        let mut chars = s.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            if in_escape {
+                if c == '[' {
+                    is_csi = true;
+                    continue;
+                }
+                if is_csi {
+                    if c.is_ascii_alphabetic() {
+                        in_escape = false;
+                        is_csi = false;
+                    }
+                    continue;
+                }
+                in_escape = false;
+                continue;
+            }
+            if c == '\x1b' {
+                in_escape = true;
+                is_csi = false;
+                continue;
+            }
+            if c == '\r' {
+                if chars.peek() == Some(&'\n') {
+                    let _ = chars.next();
+                    result.push_str(&current_line);
+                    result.push('\n');
+                    current_line.clear();
+                } else {
+                    current_line.clear();
+                }
+                continue;
+            }
+            if c == '\n' {
+                result.push_str(&current_line);
+                result.push('\n');
+                current_line.clear();
+                continue;
+            }
+            current_line.push(c);
+        }
+        result.push_str(&current_line);
+        result
     }
 
     pub fn run_selected(&mut self) -> Result<()> {
@@ -360,17 +413,17 @@ impl App {
         self.status_msg = format!("{} matches", self.filtered.len());
     }
 
-    fn scroll_output(&mut self, delta: i16) {
+    fn scroll_output(&mut self, delta: isize) {
         let max = self.output_line_count().saturating_sub(1);
-        let new_scroll = (self.output_scroll as i16 + delta).max(0).min(max as i16);
-        self.output_scroll = new_scroll as u16;
+        let new_scroll = (self.output_scroll as isize + delta).max(0).min(max as isize);
+        self.output_scroll = new_scroll as usize;
     }
 
-    pub fn output_line_count(&self) -> u16 {
+    pub fn output_line_count(&self) -> usize {
         if self.output.is_empty() {
             return 0;
         }
-        self.output.lines().count() as u16
+        self.output.lines().count()
     }
 
     pub fn run(&mut self) -> Result<()> {
@@ -384,57 +437,60 @@ impl App {
         let tick_rate = Duration::from_millis(50);
 
         while !self.should_quit {
-                // Execute any pending command with TUI suspend/resume
+            // Execute any pending command
             if let Some(run) = self.pending_run.take() {
-                // Suspend the TUI
-                let mut suspend = || -> Result<()> {
-                    disable_raw_mode()?;
-                    terminal.backend_mut().execute(LeaveAlternateScreen)?;
-                    terminal.backend_mut().execute(cursor::Show)?;
-                    terminal.backend_mut().flush()?;
-                    Ok(())
-                };
-                if let Err(e) = suspend() {
-                    self.status_msg = format!("Suspend error: {e}");
-                    // Try to recover
-                    let _ = enable_raw_mode();
-                    let _ = terminal.backend_mut().execute(EnterAlternateScreen);
-                }
+                // Show brief status in the TUI before suspending
+                self.status_msg = format!("Running: {}", run.command);
+                let _ = terminal.draw(|f| ui::render(f, self));
+                std::thread::sleep(Duration::from_millis(100));
 
-                // Run the command with the real terminal
+                // Suspend the TUI
+                disable_raw_mode()?;
+                terminal.backend_mut().execute(LeaveAlternateScreen)?;
+                terminal.backend_mut().execute(cursor::Show)?;
+                terminal.backend_mut().flush()?;
+
+                // Transition banner — gives visual context during the switch
+                let cmd_preview = if run.command.len() > 55 {
+                    format!("{}…", &run.command[..52])
+                } else {
+                    run.command.clone()
+                };
+                let _ = write!(
+                    std::io::stdout(),
+                    "\n\r\x1b[32m━━━ cmdstr ── Running: \x1b[1m{}\x1b[22m \x1b[32m───\x1b[0m\n\r\n",
+                    cmd_preview,
+                );
+                let _ = std::io::stdout().flush();
+
+                // Run the command interactively on the real terminal
                 let (output, exit_code) = Self::run_shell_suspended(
                     &run.command,
                     run.password.as_deref(),
                 ).unwrap_or_else(|e| (format!("Error: {e}"), -1));
 
-                // Capture to DB
-                if let Err(e) = Self::capture_output(&run.command) {
-                    eprintln!("Failed to capture: {e}");
-                }
+                // Done banner — hold briefly so fast commands don't blink
+                let _ = write!(
+                    std::io::stdout(),
+                    "\r\x1b[32m━━━ cmdstr ── \x1b[1mDone\x1b[22m (exit: {}) \x1b[32m───\x1b[0m\n\r\n",
+                    exit_code,
+                );
+                let _ = std::io::stdout().flush();
+                std::thread::sleep(Duration::from_millis(300));
 
-                // Reset terminal to a known good state
+                // Reset terminal and re-enter the TUI
                 let _ = std::process::Command::new("stty").arg("sane").status();
 
-                // Re-enter the TUI
-                let mut resume = || -> Result<()> {
-                    enable_raw_mode()?;
-                    terminal.backend_mut().execute(EnterAlternateScreen)?;
-                    terminal.backend_mut().execute(cursor::Hide)?;
-                    terminal.clear()?;
-                    Ok(())
-                };
-                if let Err(e) = resume() {
-                    self.status_msg = format!("Resume error: {e}");
-                    self.should_quit = true;
-                }
+                enable_raw_mode()?;
+                terminal.backend_mut().execute(EnterAlternateScreen)?;
+                terminal.backend_mut().execute(cursor::Hide)?;
+                terminal.clear()?;
 
-                // Update state
+                Self::capture_output(&run.command).ok();
                 self.output = output;
                 self.status_msg = format!("Command exited: {}", exit_code);
                 self.output_scroll = 0;
-                if let Err(e) = self.reload_and_select(0) {
-                    eprintln!("Failed to reload: {e}");
-                }
+                self.reload_and_select(0)?;
             }
 
             let _ = terminal.draw(|f| ui::render(f, self));
@@ -455,9 +511,11 @@ impl App {
             }
         }
 
-        disable_raw_mode()?;
-        terminal.backend_mut().execute(LeaveAlternateScreen)?;
-        terminal.backend_mut().flush()?;
+        // Clean exit: restore terminal to a usable state
+        let _ = disable_raw_mode();
+        let _ = terminal.backend_mut().execute(cursor::Show);
+        let _ = terminal.backend_mut().execute(LeaveAlternateScreen);
+        let _ = terminal.backend_mut().flush();
         Ok(())
     }
 
@@ -470,6 +528,17 @@ impl App {
             match code {
                 KeyCode::Char('q') if modifiers == KeyModifiers::NONE => self.should_quit = true,
                 KeyCode::Char('c') if modifiers == KeyModifiers::CONTROL => self.should_quit = true,
+
+                KeyCode::Char('?') | KeyCode::F(1) => {
+                    if self.show_help {
+                        self.show_help = false;
+                    } else if !self.show_password_popup {
+                        self.show_help = true;
+                    }
+                }
+                KeyCode::Esc if self.show_help => {
+                    self.show_help = false;
+                }
 
                 KeyCode::Char('j') | KeyCode::Down
                     if self.selected + 1 < self.filtered.len() => {

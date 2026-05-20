@@ -44,3 +44,6 @@ dirs = "5"
 whoami = "1"
 ratatui = "0.28"
 crossterm = "0.28"
+
+[dev-dependencies]
+tempfile = "3"

@@ -237,6 +237,8 @@ cmdstr tui
 
 Launches a hacker-themed terminal UI for browsing, searching, running, tagging, and managing your command history interactively.
 
+The TUI shows a split view: a **command list** on top with `▸` pointer, `✓`/`✗` status, and `★` bookmark marker, and an **output panel** below displaying captured command output with a scroll bar, alternating line colours, and a `5:42`-style line counter.
+
 #### Navigation & Selection
 
 | Key | Action |
@@ -246,8 +248,9 @@ Launches a hacker-themed terminal UI for browsing, searching, running, tagging, 
 | `G` | Go to bottom of list |
 | `Ctrl+↑` / `Ctrl+↓` | Scroll output up / down |
 | `PageUp` / `PageDown` | Scroll output by 5 lines |
+| `?` / `F1` | Show help popup (dismiss with `Esc`) |
 
-Commands are displayed one per line with a `▸` pointer on the selected entry, a `✓`/`✗` status indicator, and a `★` bookmark marker.
+The help bar at the bottom shows a compact summary of available actions.
 
 #### Running Commands
 
@@ -257,17 +260,16 @@ Commands are displayed one per line with a `▸` pointer on the selected entry, 
 | `r` | Type and run an arbitrary command |
 | `S` | Toggle **sudo mode** (red theme, all commands prefixed with `sudo`) |
 
-Commands run in a real PTY via `script(1)` — interactive prompts (like `apt upgrade`) work fully, and all output is captured and displayed in the output panel for review after the command finishes.
+Commands run in a real PTY via `script(1)` — interactive prompts (like `apt upgrade`) work fully, and all output is captured and displayed in the output panel after the command finishes.
 
 #### Sudo & Password Popup
 
 When sudo mode is toggled (`S`), the UI switches to a **red-on-black hacker theme**. Pressing `Enter` on a command while in sudo mode:
 
-1. **Caches sudo credentials** via `sudo -S -v` (password sent over a secure pipe)
-2. Runs the command with full `sudo` privileges
-3. Captures the output for display
-
-The password popup uses masked input (`••••`) and never echoes the password to the terminal.
+1. Shows a password popup with masked input (`••••`)
+2. **Caches sudo credentials** via `sudo -S -v` (password sent over a secure pipe)
+3. Runs the command with full `sudo` privileges
+4. Captures the output for display
 
 #### Managing Commands
 
@@ -278,29 +280,32 @@ The password popup uses masked input (`••••`) and never echoes the passw
 | `n` / `a` | Add a note to the selected command |
 | `b` | Toggle bookmark (`★`) |
 | `d` | Delete the selected command |
-| `w` | Manually add a command to the store |
+| `w` | Manually add a command to the store (capture without running) |
+
+All actions save immediately to the SQLite database.
 
 #### Quitting
 
 | Key | Action |
 |-----|--------|
-| `q` / `Esc` / `Ctrl+C` | Quit the TUI |
+| `q` | Quit the TUI |
+| `Ctrl+C` | Quit from any mode |
+| `Esc` | Cancel current input / close popup |
 
 #### How Command Execution Works
 
-The TUI fully suspends itself before running external commands:
+The TUI suspends itself before running external commands, with visual transition cues:
 
-1. Leaves the alternate screen buffer
-2. Disables raw mode (restores normal terminal settings)
-3. Shows the cursor
-4. Runs the command inside `script(1)` — preserves interactivity AND captures output
-5. Runs `stty sane` to reset any terminal state changes from the command
-6. Re-enters the alternate screen, re-enables raw mode, hides the cursor
-7. Displays captured output in the output panel
+1. **Brief in-TUI status** — shows `Running: <cmd>` for 100ms so you see what's about to run
+2. **Suspends the TUI** — leaves alternate screen, disables raw mode, shows cursor
+3. **Transition banner** — displays a green `━━━ cmdstr ── Running: <cmd> ───` banner on the main screen
+4. **Executes via `script(1)`** — the command runs inside a real PTY so interactive apps (`apt`, `vim`, `htop`) work fully, while output is captured to a temp file
+5. **Post-command cleanup** — `stty sane` restores any terminal state changes the command may have left
+6. **Done banner** — shows `━━━ cmdstr ── Done (exit: N) ───` for at least 300ms so fast commands don't blink past
+7. **Resumes the TUI** — re-enters alternate screen, re-enables raw mode, hides cursor
+8. **Displays captured output** — ANSI escape codes are stripped, `\r` / `\r\n` line endings are normalised, and `script(1)` recording headers/footers are removed
 
-This approach handles everything from simple commands (`echo hello`) to complex interactive sessions (`apt upgrade`, `vim`, `htop`) without crashing or corrupting the TUI.
-
-All actions (tagging, notes, bookmarks, deletions) are saved immediately to the SQLite database.
+This approach handles everything from `echo hello` to `apt upgrade` and `vim` without crashing or corrupting the TUI state.
 
 ---
 

@@ -67,7 +67,7 @@ pub fn execute(args: &ExportArgs) -> Result<()> {
     Ok(())
 }
 
-fn commands_to_csv(commands: &[Command]) -> String {
+pub(crate) fn commands_to_csv(commands: &[Command]) -> String {
     let mut csv = String::from("id,command,cwd,exit_code,duration_ms,session_id,hostname,captured_at,note,bookmark\n");
     for cmd in commands {
         csv.push_str(&format!(
@@ -87,10 +87,109 @@ fn commands_to_csv(commands: &[Command]) -> String {
     csv
 }
 
-fn escape_csv(s: &str) -> String {
+pub(crate) fn escape_csv(s: &str) -> String {
     if s.contains(',') || s.contains('"') || s.contains('\n') {
         format!("\"{}\"", s.replace('"', "\"\""))
     } else {
         s.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::models::Command;
+
+    #[test]
+    fn test_escape_csv_plain() {
+        assert_eq!(escape_csv("hello"), "hello");
+    }
+
+    #[test]
+    fn test_escape_csv_with_commas() {
+        assert_eq!(escape_csv("a,b,c"), "\"a,b,c\"");
+    }
+
+    #[test]
+    fn test_escape_csv_with_quotes() {
+        assert_eq!(escape_csv("say \"hello\""), "\"say \"\"hello\"\"\"");
+    }
+
+    #[test]
+    fn test_escape_csv_with_newline() {
+        assert_eq!(escape_csv("line1\nline2"), "\"line1\nline2\"");
+    }
+
+    #[test]
+    fn test_escape_csv_empty() {
+        assert_eq!(escape_csv(""), "");
+    }
+
+    #[test]
+    fn test_commands_to_csv_empty() {
+        let csv = commands_to_csv(&[]);
+        assert_eq!(csv, "id,command,cwd,exit_code,duration_ms,session_id,hostname,captured_at,note,bookmark\n");
+    }
+
+    #[test]
+    fn test_commands_to_csv_single() {
+        let cmd = Command {
+            id: "test-id".into(),
+            command: "echo hi".into(),
+            cwd: "/home".into(),
+            exit_code: 0,
+            duration_ms: 100,
+            session_id: "s1".into(),
+            hostname: "box".into(),
+            captured_at: "2026-01-01T00:00:00Z".into(),
+            tags: vec![],
+            annotation: None,
+            is_bookmark: false,
+        };
+        let csv = commands_to_csv(&[cmd]);
+        let expected = "id,command,cwd,exit_code,duration_ms,session_id,hostname,captured_at,note,bookmark\n\
+                        test-id,echo hi,/home,0,100,s1,box,2026-01-01T00:00:00Z,,false\n";
+        assert_eq!(csv, expected);
+    }
+
+    #[test]
+    fn test_commands_to_csv_with_annotation() {
+        let cmd = Command {
+            id: "id1".into(),
+            command: "docker ps".into(),
+            cwd: "/".into(),
+            exit_code: 0,
+            duration_ms: 50,
+            session_id: "s2".into(),
+            hostname: "host".into(),
+            captured_at: "2026-06-01T12:00:00Z".into(),
+            tags: vec![],
+            annotation: Some("list containers".into()),
+            is_bookmark: true,
+        };
+        let csv = commands_to_csv(&[cmd]);
+        assert!(csv.contains("docker ps"));
+        assert!(csv.contains("list containers"));
+        assert!(csv.contains("true"));
+        assert!(csv.contains("id1"));
+    }
+
+    #[test]
+    fn test_commands_to_csv_quotes_special_chars() {
+        let cmd = Command {
+            id: "id2".into(),
+            command: "cmd,with,commas".into(),
+            cwd: "/tmp".into(),
+            exit_code: 0,
+            duration_ms: 0,
+            session_id: "s".into(),
+            hostname: "h".into(),
+            captured_at: "t".into(),
+            tags: vec![],
+            annotation: None,
+            is_bookmark: false,
+        };
+        let csv = commands_to_csv(&[cmd]);
+        assert!(csv.contains("\"cmd,with,commas\""));
     }
 }

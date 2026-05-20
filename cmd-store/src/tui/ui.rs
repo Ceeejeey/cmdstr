@@ -84,6 +84,10 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if app.show_password_popup {
         render_password_popup(f, area, app);
     }
+
+    if app.show_help {
+        render_help_popup(f, area);
+    }
 }
 
 fn render_title(f: &mut Frame, area: Rect, app: &App) {
@@ -301,7 +305,7 @@ fn render_output(f: &mut Frame, area: Rect, app: &App, sudo: bool) {
     let line_count = if app.output.is_empty() {
         0
     } else {
-        app.output.lines().count() as u16
+        app.output.lines().count()
     };
     let scroll_max = line_count.saturating_sub(1);
 
@@ -314,47 +318,63 @@ fn render_output(f: &mut Frame, area: Rect, app: &App, sudo: bool) {
         return;
     }
 
+    let output_style = if sudo {
+        Style::new().fg(Color::Rgb(0xcc, 0x66, 0x66)).bg(BG)
+    } else {
+        Style::new().fg(Color::Rgb(0x88, 0xcc, 0x88)).bg(BG)
+    };
+    let alt_output_style = if sudo {
+        Style::new().fg(Color::Rgb(0xaa, 0x55, 0x55)).bg(BG)
+    } else {
+        Style::new().fg(Color::Rgb(0x66, 0xaa, 0x66)).bg(BG)
+    };
+
     let output_lines: Vec<Line> = app.output.lines()
-        .map(|l| Line::from(Span::styled(l.to_string(), base_style(sudo))))
+        .enumerate()
+        .map(|(i, l)| {
+            let style = if i % 2 == 0 { output_style } else { alt_output_style };
+            Line::from(vec![
+                Span::styled("  ", dim_style(sudo)),
+                Span::styled(l.to_string(), style),
+            ])
+        })
         .collect();
     let output_text = Text::from(output_lines);
 
     let para = Paragraph::new(output_text)
         .style(Style::new().bg(BG))
-        .scroll((app.output_scroll, 0))
+        .scroll((app.output_scroll as u16, 0))
         .wrap(Wrap { trim: false });
     f.render_widget(para, inner);
 
     if line_count > 0 && inner.height >= 2 {
         let scroll_pos = if scroll_max > 0 {
             let pct = app.output_scroll as f64 / scroll_max as f64;
-            let bar_h = (inner.height as f64 * 0.3).max(1.0) as u16;
+            let bar_h = (inner.height as f64 * 0.25).max(1.0) as u16;
             let thumb_pos = ((inner.height.saturating_sub(bar_h)) as f64 * pct) as u16;
             (thumb_pos, bar_h)
         } else {
             (0u16, inner.height)
         };
 
-        let bar_x = inner.right().saturating_sub(1);
+        let bar_x = inner.right().saturating_sub(2);
         let scroll_color = if sudo { DARK_RED } else { DARK_GREEN };
         let thumb_color = if sudo { RED } else { GREEN };
 
         for y in inner.top()..inner.bottom() {
             let rel_y = y - inner.top();
-            let c = if rel_y >= scroll_pos.0 && rel_y < scroll_pos.0 + scroll_pos.1 {
-                thumb_color
-            } else {
-                scroll_color
-            };
+            let is_thumb = rel_y >= scroll_pos.0 && rel_y < scroll_pos.0 + scroll_pos.1;
+            let c = if is_thumb { thumb_color } else { scroll_color };
+            let ch = if is_thumb { "█" } else { "░" };
             f.render_widget(
-                Paragraph::new(Text::from(Line::from(Span::styled("▐", Style::new().fg(c).bg(BG))))),
+                Paragraph::new(Text::from(Line::from(Span::styled(ch, Style::new().fg(c).bg(BG))))),
                 Rect::new(bar_x, y, 1, 1),
             );
         }
 
         let line_info = format!(" {}:{} ", app.output_scroll + 1, line_count);
-        if area.width > line_info.len() as u16 + 4 {
-            let info_x = inner.right().saturating_sub(line_info.len() as u16 + 1);
+        if inner.width > line_info.len() as u16 + 4 {
+            let info_x = inner.right().saturating_sub(line_info.len() as u16 + 2);
             f.render_widget(
                 Paragraph::new(Text::from(Line::from(Span::styled(
                     &line_info,
@@ -429,19 +449,7 @@ fn render_help(f: &mut Frame, area: Rect, app: &App, sudo: bool) {
                 Span::styled(" │ ", dim_style(sudo)),
                 Span::styled("[Enter]Run", dim_style(sudo)),
                 Span::styled(" │ ", dim_style(sudo)),
-                Span::styled("[r]Type", dim_style(sudo)),
-                Span::styled(" │ ", dim_style(sudo)),
-                Span::styled("[w]Add", dim_style(sudo)),
-                Span::styled(" │ ", dim_style(sudo)),
-                Span::styled("[/s]Search", dim_style(sudo)),
-                Span::styled(" │ ", dim_style(sudo)),
-                Span::styled("[t]Tag", dim_style(sudo)),
-                Span::styled(" │ ", dim_style(sudo)),
-                Span::styled("[a/n]Note", dim_style(sudo)),
-                Span::styled(" │ ", dim_style(sudo)),
-                Span::styled("[b]Bookmark", dim_style(sudo)),
-                Span::styled(" │ ", dim_style(sudo)),
-                Span::styled("[d]Del", dim_style(sudo)),
+                Span::styled("[?]Help", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
                 Span::styled(" │ ", dim_style(sudo)),
                 Span::styled("[S]", if sudo { error_style() } else { fg(YELLOW) }),
                 Span::styled("Sudo", dim_style(sudo)),
@@ -556,4 +564,112 @@ fn short_datetime(rfc3339: &str) -> String {
     } else {
         rfc3339.to_string()
     }
+}
+
+fn render_help_popup(f: &mut Frame, area: Rect) {
+    let popup_width = area.width.min(56);
+    let popup_height = 21;
+    let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let popup_y = area.y + (area.height.saturating_sub(popup_height)) / 2;
+
+    let popup_rect = Rect::new(popup_x, popup_y, popup_width, popup_height);
+    f.render_widget(Clear, popup_rect);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Thick)
+        .border_style(Style::new().fg(GREEN))
+        .title(Line::from(Span::styled(
+            " ⌨  KEYBINDINGS ",
+            Style::new().fg(GREEN).bg(BG).add_modifier(Modifier::BOLD),
+        )))
+        .style(Style::new().bg(BG));
+
+    let inner = block.inner(popup_rect);
+    f.render_widget(block, popup_rect);
+
+    let content = vec![
+        Line::from(vec![
+            Span::styled(" Navigation ", Style::new().fg(YELLOW).bg(BG).add_modifier(Modifier::BOLD)),
+            Span::styled(" │ ", dim_style(false)),
+            Span::styled(" Output ", Style::new().fg(YELLOW).bg(BG).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(vec![
+            Span::styled("  ↑/↓ j/k", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
+            Span::styled("  Move    ", dim_style(false)),
+            Span::styled(" │ ", dim_style(false)),
+            Span::styled("Ctrl+↑/↓", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
+            Span::styled(" Scroll", dim_style(false)),
+        ]),
+        Line::from(vec![
+            Span::styled("  g", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
+            Span::styled("          Top     ", dim_style(false)),
+            Span::styled(" │ ", dim_style(false)),
+            Span::styled("PgUp/Dn", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
+            Span::styled("  Jump 5", dim_style(false)),
+        ]),
+        Line::from(vec![
+            Span::styled("  G", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
+            Span::styled("          Bottom", dim_style(false)),
+        ]),
+        Line::from(vec![Span::styled("", dim_style(false))]),
+        Line::from(vec![
+            Span::styled(" Commands ", Style::new().fg(YELLOW).bg(BG).add_modifier(Modifier::BOLD)),
+            Span::styled(" │ ", dim_style(false)),
+            Span::styled(" Modes ", Style::new().fg(YELLOW).bg(BG).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(vec![
+            Span::styled("  Enter", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
+            Span::styled("      Run cmd    ", dim_style(false)),
+            Span::styled(" │ ", dim_style(false)),
+            Span::styled("r", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
+            Span::styled("       Run", dim_style(false)),
+        ]),
+        Line::from(vec![
+            Span::styled("  S", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
+            Span::styled("          Sudo     ", dim_style(false)),
+            Span::styled(" │ ", dim_style(false)),
+            Span::styled("w", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
+            Span::styled("       Add", dim_style(false)),
+        ]),
+        Line::from(vec![
+            Span::styled("  ? / F1", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
+            Span::styled("     Help     ", dim_style(false)),
+            Span::styled(" │ ", dim_style(false)),
+            Span::styled("/ or s", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
+            Span::styled("  Search", dim_style(false)),
+        ]),
+        Line::from(vec![
+            Span::styled("                     ", dim_style(false)),
+            Span::styled(" │ ", dim_style(false)),
+            Span::styled("t", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
+            Span::styled("       Tag", dim_style(false)),
+        ]),
+        Line::from(vec![
+            Span::styled("", dim_style(false)),
+            Span::styled(" │ ", dim_style(false)),
+            Span::styled("n / a", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
+            Span::styled("     Note", dim_style(false)),
+        ]),
+        Line::from(vec![Span::styled("", dim_style(false))]),
+        Line::from(vec![
+            Span::styled(" Manage ", Style::new().fg(YELLOW).bg(BG).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(vec![
+            Span::styled("  b", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
+            Span::styled("          Bookmark", dim_style(false)),
+        ]),
+        Line::from(vec![
+            Span::styled("  d", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
+            Span::styled("          Delete", dim_style(false)),
+        ]),
+        Line::from(vec![Span::styled("", dim_style(false))]),
+        Line::from(vec![
+            Span::styled("  [Esc] Close", Style::new().fg(RED).bg(BG).add_modifier(Modifier::BOLD)),
+        ]),
+    ];
+
+    let para = Paragraph::new(Text::from(content))
+        .style(Style::new().bg(BG));
+    f.render_widget(para, inner);
 }

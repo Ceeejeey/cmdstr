@@ -56,6 +56,7 @@ fn detect_shell() -> String {
         .unwrap_or_default()
         .split('/')
         .next_back()
+        .filter(|s| !s.is_empty())
         .unwrap_or("bash")
         .to_string()
 }
@@ -123,4 +124,117 @@ function cmdstr_precmd --on-event fish_postexec
 end
 "##,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn test_generate_bash_hook_contains_bin() {
+        let hook = generate_bash_hook("/usr/local/bin/cmdstr");
+        assert!(hook.contains("/usr/local/bin/cmdstr capture"));
+    }
+
+    #[test]
+    fn test_generate_bash_hook_contains_preexec() {
+        let hook = generate_bash_hook("cmdstr");
+        assert!(hook.contains("cmdstr_preexec()"));
+        assert!(hook.contains("cmdstr_precmd()"));
+    }
+
+    #[test]
+    fn test_generate_bash_hook_session_id() {
+        let hook = generate_bash_hook("cmdstr");
+        assert!(hook.contains("__cmdstr_session_id"));
+    }
+
+    #[test]
+    fn test_generate_zsh_same_as_bash() {
+        assert_eq!(generate_zsh_hook("cmdstr"), generate_bash_hook("cmdstr"));
+    }
+
+    #[test]
+    fn test_generate_fish_hook_contains_bin() {
+        let hook = generate_fish_hook("/opt/cmdstr");
+        assert!(hook.contains("/opt/cmdstr capture"));
+    }
+
+    #[test]
+    fn test_generate_fish_hook_contains_events() {
+        let hook = generate_fish_hook("cmdstr");
+        assert!(hook.contains("--on-event fish_preexec"));
+        assert!(hook.contains("--on-event fish_postexec"));
+    }
+
+    #[test]
+    fn test_detect_shell_from_env() {
+        let _g = ENV_LOCK.lock().unwrap();
+        let old = std::env::var("SHELL").ok();
+        std::env::set_var("SHELL", "/usr/bin/zsh");
+        assert_eq!(detect_shell(), "zsh");
+        restore_env("SHELL", old);
+    }
+
+    #[test]
+    fn test_detect_shell_fallback() {
+        let _g = ENV_LOCK.lock().unwrap();
+        let old = std::env::var("SHELL").ok();
+        std::env::remove_var("SHELL");
+        assert_eq!(detect_shell(), "bash");
+        restore_env("SHELL", old);
+    }
+
+    #[test]
+    fn test_detect_shell_takes_basename() {
+        let _g = ENV_LOCK.lock().unwrap();
+        let old = std::env::var("SHELL").ok();
+        std::env::set_var("SHELL", "/opt/local/bin/fish");
+        assert_eq!(detect_shell(), "fish");
+        restore_env("SHELL", old);
+    }
+
+    #[test]
+    fn test_rc_path_for_bash() {
+        let home = dirs::home_dir().expect("home dir");
+        assert_eq!(rc_path_for_shell("bash").unwrap(), home.join(".bashrc"));
+    }
+
+    #[test]
+    fn test_rc_path_for_zsh() {
+        let home = dirs::home_dir().expect("home dir");
+        assert_eq!(rc_path_for_shell("zsh").unwrap(), home.join(".zshrc"));
+    }
+
+    #[test]
+    fn test_rc_path_for_fish() {
+        let home = dirs::home_dir().expect("home dir");
+        assert_eq!(
+            rc_path_for_shell("fish").unwrap(),
+            home.join(".config/fish/config.fish")
+        );
+    }
+
+    #[test]
+    fn test_rc_path_unsupported_shell() {
+        assert!(rc_path_for_shell("tcsh").is_err());
+    }
+
+    #[test]
+    fn test_hooks_contain_cmdstr_comment() {
+        let bash = generate_bash_hook("cmdstr");
+        let fish = generate_fish_hook("cmdstr");
+        assert!(bash.contains("# cmdstr: smart command storage"));
+        assert!(fish.contains("# cmdstr: smart command storage"));
+    }
+
+    fn restore_env(name: &str, old: Option<String>) {
+        match old {
+            Some(v) => std::env::set_var(name, v),
+            None => std::env::remove_var(name),
+        }
+    }
 }
