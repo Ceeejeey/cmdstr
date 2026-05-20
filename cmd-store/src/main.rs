@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use cmd_store::cli;
 
 #[derive(Parser)]
-#[command(name = "cmdstr", about = "Smart command storage and recall for the terminal")]
+#[command(name = "cmdstr", version, about = "Smart command storage and recall for the terminal")]
 #[command(args_conflicts_with_subcommands = true)]
 struct Cli {
     /// Tag name to look up and run its associated command

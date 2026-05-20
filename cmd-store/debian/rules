@@ -1,7 +1,19 @@
 #!/usr/bin/make -f
 
 %:
-	dh $@ --buildsystem cargo
+	dh $@
+
+override_dh_auto_configure:
+	@echo "No configure needed"
+
+override_dh_clean:
+	dh_clean -Xvendor
+
+override_dh_auto_build:
+	cargo-1.91 build --offline --release
+
+override_dh_auto_test:
+	@echo "Skipping tests in build environment"
 
 override_dh_auto_install:
-	dh_auto_install -- install --root=/usr
+	mkdir -p $(CURDIR)/debian/cmdstr/usr/bin && cp target/release/cmdstr $(CURDIR)/debian/cmdstr/usr/bin/

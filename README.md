@@ -17,7 +17,8 @@ Never lose that complicated `ffmpeg` incantation or that perfect `docker` comman
 - **Statistics** — total commands, unique commands, failure rate, top tags, most frequent commands
 - **Export** — JSON or CSV export of your entire history
 - **Direct execution** — tag a command and run it later with `cmdstr run <tag>` or just `cmdstr <tag>`
-- **Interactive TUI** — hacker-themed terminal UI to browse, search, run, tag, and manage commands
+- **Interactive TUI** — hacker-themed terminal UI to browse, search, run, tag, and manage commands with sudo mode and suspend/resume execution
+- **60+ automated tests** — CI-ready test suite covering capture, tagging, annotations, search, export, stats, and shell hooks
 - **Shell integration** — bash, zsh, and fish hooks for automatic capture (install via `cmdstr install`)
 - **XDG-compliant** — data stored at `$XDG_DATA_HOME/cmdstr/commands.db`
 
@@ -28,7 +29,15 @@ Never lose that complicated `ffmpeg` incantation or that perfect `docker` comman
 ### From PPA (Ubuntu / Debian)
 
 ```bash
-sudo add-apt-repository ppa:ceeejeey/cmdstr
+sudo add-apt-repository ppa:gihan0205/ppa
+sudo apt update
+sudo apt install cmdstr
+```
+
+**Troubleshooting:**
+If you get a `NO_PUBKEY` error during `apt update` (usually caused by strict firewalls blocking the keyserver), you can manually add the key:
+```bash
+sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 58CBF0A2D6469234
 sudo apt update
 sudo apt install cmdstr
 ```
@@ -38,7 +47,15 @@ sudo apt install cmdstr
 ```bash
 git clone https://github.com/ceeejeey/cmdstr.git
 cd cmdstr
+
+# Build and test
 cargo build --release
+cargo test
+
+# Verify the version
+cargo run --release -- --version
+
+# Install system-wide
 sudo cp target/release/cmdstr /usr/local/bin/
 ```
 
@@ -57,6 +74,9 @@ This auto-detects your shell and adds the capture hook to `~/.bashrc`, `~/.zshrc
 ```bash
 # Show help
 cmdstr --help
+
+# Check version
+cmdstr --version
 
 # Search your command history
 cmdstr search docker
@@ -413,6 +433,12 @@ cargo build
 
 # Release build
 cargo build --release
+
+# Run test suite (60+ tests)
+cargo test
+
+# Check lints
+cargo clippy
 
 # Debian package (requires cargo-deb)
 cargo install cargo-deb

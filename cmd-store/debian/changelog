@@ -1,5 +1,48 @@
-cmdstr (0.1.0-1) unstable; urgency=medium
+cmdstr (0.1.3-1) noble; urgency=medium
+
+  [ Gihan Vimukthi ]
+  * Fix vendored Cargo.lock strict versions.
+
+  [ Gihan Vimukthi ]
+  * Fix vendored Cargo.lock strict versions.
+
+ -- Gihan Vimukthi <gihanvimukthi19@gmail.com>  Wed, 20 May 2026 21:29:54 +0530
+
+cmdstr (0.1.2-2) noble; urgency=medium
+
+  * Repackage to remove corrupted auto-patch.
+
+ -- Gihan Vimukthi <gihanvimukthi19@gmail.com>  Wed, 20 May 2026 20:46:31 +0530
+
+cmdstr (0.1.2-1) noble; urgency=medium
+
+  * New upstream release with vendored Rust dependencies.
+  * Build with cargo --offline.
+
+ -- Gihan Vimukthi <gihanvimukthi19@gmail.com>  Wed, 20 May 2026 17:00:00 +0530
+
+cmdstr (0.1.0-6) noble; urgency=medium
+
+  * Vendor Rust deps via debian tarball instead of orig tarball
+
+ -- Gihan Vimukthi <gihanvimukthi19@gmail.com>  Wed, 20 May 2026 16:30:00 +0530
+
+cmdstr (0.1.0-2) noble; urgency=medium
+
+  * Fix distribution for Ubuntu Noble PPA
+
+ -- Gihan Vimukthi <gihanvimukthi19@gmail.com>  Wed, 20 May 2026 14:55:00 +0530
+
+cmdstr (0.1.0-1) noble; urgency=medium
 
   * Initial release for PPA.
+  * Auto-capture via bash/zsh/fish hooks.
+  * Full-text search with tag/date/failed/bookmark filtering.
+  * Tag, annotate, and bookmark commands.
+  * JSON and CSV export.
+  * Direct execution by tag.
+  * Interactive TUI with sudo mode, search, tagging, output capture.
+  * 60+ automated tests.
 
- -- Gihan Vimukthi <gihanvimukthi19@gmail.com>  Sun, 17 May 2026 00:00:00 +0000
+ -- Gihan Vimukthi <gihanvimukthi19@gmail.com>  Wed, 20 May 2026 00:00:00 +0000
+
