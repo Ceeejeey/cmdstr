@@ -5,36 +5,56 @@ use clap::Args;
 use rusqlite::Connection;
 
 #[derive(Args)]
+#[command(
+    about = "Search, filter, and list recorded terminal commands",
+    long_about = "Queries your database of command history. You can search by text queries (fuzzy match), \
+                  by specific tag names, runtime failure states, bookmarks, or by duration. Out-of-the-box \
+                  support for formatted tabular output or raw, beautiful JSON exports.",
+    after_help = "💡 EXAMPLES & FILTERS:\n\n  \
+       1. Search for a keyword anywhere in command strings:\n     \
+          $ cmdstr search \"git commit\"\n\n  \
+       2. Filter commands by tag name:\n     \
+          $ cmdstr search --tag release\n\n  \
+       3. Find failed commands from the last 24 hours:\n     \
+          $ cmdstr search --failed --last 24\n\n  \
+       4. View bookmarked commands only:\n     \
+          $ cmdstr search --bookmarks\n\n  \
+       5. List most frequently used commands across all logs:\n     \
+          $ cmdstr search --freq\n\n  \
+       6. Export query results in raw JSON format:\n     \
+          $ cmdstr search \"npm\" --json --limit 5"
+)]
 pub struct QueryArgs {
-    /// Search term (fuzzy matched against command text)
+    /// Search query term to match against command text
+    #[arg(help = "The text pattern to find. Performs a wildcard match (%query%) on command history.")]
     pub query: Option<String>,
 
-    /// Filter by tag
-    #[arg(short, long)]
+    /// Filter commands by specific tag name
+    #[arg(short, long, help = "Only show commands tagged with this specific exact tag name")]
     pub tag: Option<String>,
 
-    /// Only commands from the last N hours
-    #[arg(long)]
+    /// Filter by hourly timeframe
+    #[arg(long, help = "Only list commands executed within the last N hours")]
     pub last: Option<u64>,
 
-    /// Only failed commands (exit code != 0)
-    #[arg(long)]
+    /// Filter for failed commands
+    #[arg(long, help = "Only show commands that exited with a non-zero code (exit_code != 0)")]
     pub failed: bool,
 
-    /// Show most frequent commands
-    #[arg(long)]
+    /// Show command frequency analytics instead of log list
+    #[arg(long, help = "Display unique commands sorted by execution counts")]
     pub freq: bool,
 
-    /// Bookmarked commands only
-    #[arg(long)]
+    /// Filter for bookmarked commands
+    #[arg(long, help = "Only show commands that have been flagged as bookmarks")]
     pub bookmarks: bool,
 
-    /// Limit results
-    #[arg(short, long, default_value = "30")]
+    /// Limit the number of returned results
+    #[arg(short, long, default_value = "30", help = "Maximum number of history logs to display")]
     pub limit: usize,
 
-    /// Output as JSON
-    #[arg(long)]
+    /// Output results as JSON instead of formatted table
+    #[arg(long, help = "Format and export query matches as structured JSON array")]
     pub json: bool,
 }
 

@@ -1,14 +1,33 @@
 # cmdstr: smart command storage — Bash hook
 # Source this in your .bashrc, or run: cmdstr install
+# Works in vanilla bash (no bash-preexec required)
 
 __cmdstr_session_id="$(uuidgen 2>/dev/null || echo $$-$(date +%s))"
+__cmdstr_cmd=""
+__cmdstr_start=""
 
-cmdstr_preexec() {
-    __cmdstr_cmd="$1"
+# Capture the command BEFORE it runs via DEBUG trap
+__cmdstr_preexec() {
+    # Only capture if we haven't already captured for this prompt cycle
+    [ -n "$__cmdstr_cmd" ] && return
+
+    local cmd="$BASH_COMMAND"
+
+    # Don't capture cmdstr's own commands or internal shell operations
+    case "$cmd" in
+        cmdstr\ capture*|__cmdstr_*|_cmdstr_*) return ;;
+    esac
+
+    # Don't capture empty or whitespace-only commands
+    local trimmed="${cmd#"${cmd%%[![:space:]]*}"}"
+    [ -z "$trimmed" ] && return
+
+    __cmdstr_cmd="$cmd"
     __cmdstr_start="$(date +%s%N)"
 }
 
-cmdstr_precmd() {
+# Process the result AFTER the command completes via PROMPT_COMMAND
+__cmdstr_precmd() {
     local exit_code=$?
     if [ -n "$__cmdstr_cmd" ]; then
         local end="$(date +%s%N)"
@@ -19,5 +38,10 @@ cmdstr_precmd() {
     __cmdstr_cmd=""
 }
 
-preexec_functions+=(cmdstr_preexec)
-precmd_functions+=(cmdstr_precmd)
+# Install the hooks
+trap '__cmdstr_preexec' DEBUG
+
+# Append to PROMPT_COMMAND without clobbering existing entries
+if [[ "$PROMPT_COMMAND" != *"__cmdstr_precmd"* ]]; then
+    PROMPT_COMMAND="__cmdstr_precmd${PROMPT_COMMAND:+;$PROMPT_COMMAND}"
+fi

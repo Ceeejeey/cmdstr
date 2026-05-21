@@ -4,7 +4,17 @@
 set -g __cmdstr_session_id (uuidgen 2>/dev/null; or echo $fish_pid-(date +%s))
 
 function cmdstr_preexec --on-event fish_preexec
-    set -g __cmdstr_cmd $argv[1]
+    set -l cmd $argv[1]
+
+    # Don't capture cmdstr's own commands
+    string match -q 'cmdstr capture*' -- $cmd; and return
+    string match -q '__cmdstr_*' -- $cmd; and return
+
+    # Don't capture empty or whitespace-only commands
+    set -l trimmed (string trim -- $cmd)
+    test -z "$trimmed"; and return
+
+    set -g __cmdstr_cmd $cmd
     set -g __cmdstr_start (date +%s%N)
 end
 

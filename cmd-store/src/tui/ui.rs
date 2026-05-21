@@ -88,6 +88,10 @@ pub fn render(f: &mut Frame, app: &mut App) {
     if app.show_help {
         render_help_popup(f, area);
     }
+
+    if app.show_welcome {
+        render_welcome_popup(f, area);
+    }
 }
 
 fn render_title(f: &mut Frame, area: Rect, app: &App) {
@@ -119,7 +123,11 @@ fn render_title(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_command_list(f: &mut Frame, area: Rect, app: &mut App, sudo: bool) {
-    let bstyle = border_style(sudo);
+    let bstyle = if !app.focus_output {
+        if sudo { fg(BRIGHT_RED) } else { fg(BRIGHT_GREEN) }
+    } else {
+        if sudo { fg(DARK_RED) } else { fg(DARK_GREEN) }
+    };
     let tstyle = title_style(sudo);
 
     let block = Block::default()
@@ -197,7 +205,11 @@ fn render_command_list(f: &mut Frame, area: Rect, app: &mut App, sudo: bool) {
 }
 
 fn render_detail(f: &mut Frame, area: Rect, app: &App, sudo: bool) {
-    let bstyle = border_style(sudo);
+    let bstyle = if app.focus_output {
+        if sudo { fg(BRIGHT_RED) } else { fg(BRIGHT_GREEN) }
+    } else {
+        if sudo { fg(DARK_RED) } else { fg(DARK_GREEN) }
+    };
     let tstyle = title_style(sudo);
 
     let block = Block::default()
@@ -329,13 +341,15 @@ fn render_output(f: &mut Frame, area: Rect, app: &App, sudo: bool) {
         Style::new().fg(Color::Rgb(0x66, 0xaa, 0x66)).bg(BG)
     };
 
+    let max_line_w = (inner.width as usize).saturating_sub(5); // indent + scrollbar
     let output_lines: Vec<Line> = app.output.lines()
         .enumerate()
         .map(|(i, l)| {
             let style = if i % 2 == 0 { output_style } else { alt_output_style };
+            let display = truncate(l, max_line_w);
             Line::from(vec![
                 Span::styled("  ", dim_style(sudo)),
-                Span::styled(l.to_string(), style),
+                Span::styled(display, style),
             ])
         })
         .collect();
@@ -343,8 +357,7 @@ fn render_output(f: &mut Frame, area: Rect, app: &App, sudo: bool) {
 
     let para = Paragraph::new(output_text)
         .style(Style::new().bg(BG))
-        .scroll((app.output_scroll as u16, 0))
-        .wrap(Wrap { trim: false });
+        .scroll((app.output_scroll as u16, 0));
     f.render_widget(para, inner);
 
     if line_count > 0 && inner.height >= 2 {
@@ -418,73 +431,117 @@ fn render_input(f: &mut Frame, area: Rect, app: &App, sudo: bool) {
         _ => (base_style(sudo), base_style(sudo)),
     };
 
-    let display_value = if app.mode == InputMode::Password {
-        "•".repeat(app.password.len())
-    } else if app.mode == InputMode::Run && app.input.is_empty() {
-        "type a command to run...".to_string()
+    let (display_value, is_placeholder) = if app.mode == InputMode::Password {
+        if app.password.is_empty() {
+            ("type sudo password (piped directly to sudo)...".to_string(), true)
+        } else {
+            ("•".repeat(app.password.len()), false)
+        }
+    } else if app.input.is_empty() {
+        match app.mode {
+            InputMode::Run => ("type a command to execute...".to_string(), true),
+            InputMode::Search => ("search commands, tags, or notes...".to_string(), true),
+            InputMode::Tag => ("enter comma-separated tags (e.g., docker, database)...".to_string(), true),
+            InputMode::Note => ("enter description or explanation for this command...".to_string(), true),
+            InputMode::Add => ("manually add a command to history...".to_string(), true),
+            _ => (String::new(), false),
+        }
     } else {
-        app.input.clone()
+        (app.input.clone(), false)
+    };
+
+    let display_style = if is_placeholder {
+        Style::new().fg(Color::DarkGray).bg(BG).add_modifier(Modifier::ITALIC)
+    } else {
+        input_style
     };
 
     let line = Line::from(vec![
         Span::styled(prompt, prompt_style),
-        Span::styled(&display_value, input_style),
+        Span::styled(&display_value, display_style),
     ]);
 
     let para = Paragraph::new(line).style(Style::new().bg(BG));
     f.render_widget(para, inner);
 
-    if cursor_visible {
+    if cursor_visible && !is_placeholder {
         let x = inner.x + prompt.len() as u16 + app.input.len() as u16;
         let x = x.min(inner.x + inner.width.saturating_sub(1));
         f.set_cursor_position((x, inner.y));
+    } else if cursor_visible && is_placeholder {
+        f.set_cursor_position((inner.x + prompt.len() as u16, inner.y));
     }
 }
 
 fn render_help(f: &mut Frame, area: Rect, app: &App, sudo: bool) {
     let help = match app.mode {
         InputMode::Tool => {
-            let help_spans = vec![
-                Span::styled(" [↑↓/j/k]Nav", dim_style(sudo)),
-                Span::styled(" │ ", dim_style(sudo)),
-                Span::styled("[Enter]Run", dim_style(sudo)),
-                Span::styled(" │ ", dim_style(sudo)),
-                Span::styled("[?]Help", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
-                Span::styled(" │ ", dim_style(sudo)),
-                Span::styled("[S]", if sudo { error_style() } else { fg(YELLOW) }),
-                Span::styled("Sudo", dim_style(sudo)),
-                Span::styled(" │ ", dim_style(sudo)),
-                Span::styled("[q]Quit", error_style()),
+            let w = area.width as usize;
+            let sep = Span::styled("│", dim_style(sudo));
+            let mut spans: Vec<Span> = Vec::new();
+
+            // Always-visible keybindings (priority order)
+            let items: Vec<(&str, Style)> = vec![
+                (" [↑↓]Nav ", Style::new().fg(Color::Cyan).bg(BG)),
+                (" [Tab]Focus ", Style::new().fg(Color::Cyan).bg(BG)),
+                (" [Enter]Run ", Style::new().fg(BRIGHT_GREEN).bg(BG)),
+                (" [c]Copy ", Style::new().fg(BRIGHT_GREEN).bg(BG)),
+                (" [/]Search ", Style::new().fg(Color::Cyan).bg(BG)),
+                (" [w]Add ", Style::new().fg(BRIGHT_GREEN).bg(BG)),
+                (" [r]Cmd ", Style::new().fg(BRIGHT_GREEN).bg(BG)),
+                (" [t]Tag ", Style::new().fg(BRIGHT_GREEN).bg(BG)),
+                (" [n]Note ", Style::new().fg(YELLOW).bg(BG)),
+                (" [b]★ ", Style::new().fg(YELLOW).bg(BG)),
+                (" [i]Stats ", Style::new().fg(Color::Cyan).bg(BG)),
+                (" [e]Export ", Style::new().fg(Color::Cyan).bg(BG)),
+                (" [S]Sudo ", if sudo { error_style() } else { Style::new().fg(YELLOW).bg(BG) }),
+                (" [d]Del ", error_style()),
+                (" [?]Help ", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
+                (" [q]Quit", error_style()),
             ];
-            Line::from(help_spans)
+
+            let mut total_len = 0usize;
+            for (i, (label, style)) in items.iter().enumerate() {
+                let entry_len = label.len() + if i > 0 { 1 } else { 0 };
+                if total_len + entry_len > w {
+                    break;
+                }
+                if i > 0 {
+                    spans.push(sep.clone());
+                    total_len += 1;
+                }
+                spans.push(Span::styled(*label, *style));
+                total_len += label.len();
+            }
+            Line::from(spans)
         }
         InputMode::Run => Line::from(vec![
-            Span::styled(" [Enter]Execute", base_style(sudo)),
+            Span::styled(" [Enter]Execute Command", base_style(sudo)),
             Span::styled(" │ ", dim_style(sudo)),
-            Span::styled("[Esc]Cancel", dim_style(sudo)),
+            Span::styled("[Esc]Cancel & Back", dim_style(sudo)),
         ]),
         InputMode::Search => Line::from(vec![
-            Span::styled(" [Enter]Search", fg(YELLOW)),
+            Span::styled(" [Enter]Apply Search Filter", fg(YELLOW)),
             Span::styled(" │ ", dim_style(sudo)),
-            Span::styled("[Esc]Cancel", dim_style(sudo)),
+            Span::styled("[Esc]Clear Filter & Back", dim_style(sudo)),
         ]),
         InputMode::Tag => Line::from(vec![
-            Span::styled(" [Enter]Save Tags", Style::new().fg(BRIGHT_GREEN).bg(BG)),
+            Span::styled(" [Enter]Save Tags (comma-separated)", Style::new().fg(BRIGHT_GREEN).bg(BG)),
             Span::styled(" │ ", dim_style(sudo)),
-            Span::styled("[Esc]Cancel", dim_style(sudo)),
+            Span::styled("[Esc]Cancel Changes", dim_style(sudo)),
         ]),
         InputMode::Note => Line::from(vec![
-            Span::styled(" [Enter]Save Note", fg(YELLOW)),
+            Span::styled(" [Enter]Save Annotation Note", fg(YELLOW)),
             Span::styled(" │ ", dim_style(sudo)),
-            Span::styled("[Esc]Cancel", dim_style(sudo)),
+            Span::styled("[Esc]Cancel Changes", dim_style(sudo)),
         ]),
         InputMode::Add => Line::from(vec![
-            Span::styled(" [Enter]Capture to store", Style::new().fg(BRIGHT_GREEN).bg(BG)),
+            Span::styled(" [Enter]Store Command (Manual Capture)", Style::new().fg(BRIGHT_GREEN).bg(BG)),
             Span::styled(" │ ", dim_style(sudo)),
-            Span::styled("[Esc]Cancel", dim_style(sudo)),
+            Span::styled("[Esc]Cancel & Back", dim_style(sudo)),
         ]),
         InputMode::Password => Line::from(vec![
-            Span::styled(" [Enter]Submit", error_style()),
+            Span::styled(" [Enter]Submit Sudo Password (secure pipe)", error_style()),
             Span::styled(" │ ", dim_style(sudo)),
             Span::styled("[Esc]Cancel", dim_style(sudo)),
         ]),
@@ -567,8 +624,8 @@ fn short_datetime(rfc3339: &str) -> String {
 }
 
 fn render_help_popup(f: &mut Frame, area: Rect) {
-    let popup_width = area.width.min(56);
-    let popup_height = 21;
+    let popup_width = area.width.saturating_sub(4).min(78);
+    let popup_height = area.height.saturating_sub(4).min(32);
     let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
     let popup_y = area.y + (area.height.saturating_sub(popup_height)) / 2;
 
@@ -578,10 +635,83 @@ fn render_help_popup(f: &mut Frame, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Thick)
-        .border_style(Style::new().fg(GREEN))
+        .border_style(Style::new().fg(BRIGHT_GREEN))
         .title(Line::from(Span::styled(
-            " ⌨  KEYBINDINGS ",
-            Style::new().fg(GREEN).bg(BG).add_modifier(Modifier::BOLD),
+            " 💡 KEYBINDINGS & GUIDE ",
+            Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD),
+        )))
+        .style(Style::new().bg(BG));
+
+    let inner = block.inner(popup_rect);
+    f.render_widget(block, popup_rect);
+
+    let d = dim_style(false);
+    let kb = |key: &'static str, desc: &'static str, c: Color| -> Line {
+        Line::from(vec![
+            Span::styled(format!("  {:<12}", key), Style::new().fg(c).bg(BG).add_modifier(Modifier::BOLD)),
+            Span::styled(desc, d),
+        ])
+    };
+
+    let section = |title: &'static str| -> Line {
+        Line::from(Span::styled(title, Style::new().fg(YELLOW).bg(BG).add_modifier(Modifier::BOLD)))
+    };
+
+    let content = vec![
+        section("  NAVIGATION"),
+        kb("Tab", "Toggle focus between Command List and Output pane", Color::Cyan),
+        kb("↑/↓ j/k", "Move selection or scroll output (based on focus)", Color::Cyan),
+        kb("g / G", "Jump to top / bottom of list or output", Color::Cyan),
+        kb("PgUp/PgDn", "Scroll output by 5 lines", Color::Cyan),
+        Line::from(""),
+        section("  ACTIONS"),
+        kb("Enter", "Run the currently selected command", BRIGHT_GREEN),
+        kb("c", "Copy selected command text to clipboard", BRIGHT_GREEN),
+        kb("r", "Type and run an arbitrary command", BRIGHT_GREEN),
+        kb("w", "Manually add a new command to history", BRIGHT_GREEN),
+        kb("d", "Delete the selected command from history", RED),
+        Line::from(""),
+        section("  ORGANIZE"),
+        kb("/ or s", "Search commands, tags, and notes", Color::Cyan),
+        kb("t", "Add or edit tags (comma-separated)", BRIGHT_GREEN),
+        kb("n or a", "Add or edit an annotation note", YELLOW),
+        kb("b", "Toggle bookmark on selected command", YELLOW),
+        Line::from(""),
+        section("  TOOLS"),
+        kb("i", "Show usage statistics in the output pane", Color::Cyan),
+        kb("e", "Export all history to ~/cmdstr_export.json", Color::Cyan),
+        kb("S", "Toggle Sudo mode (prepends sudo to runs)", YELLOW),
+        kb("?  / F1", "Toggle this help screen", BRIGHT_GREEN),
+        kb("q", "Quit cmdstr TUI", RED),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  [Esc] Close  ", Style::new().fg(RED).bg(BG).add_modifier(Modifier::BOLD)),
+            Span::styled("                     cmdstr v0.1.5", Style::new().fg(YELLOW).bg(BG).add_modifier(Modifier::DIM)),
+        ]),
+    ];
+
+    let para = Paragraph::new(Text::from(content))
+        .style(Style::new().bg(BG))
+        .scroll((0, 0));
+    f.render_widget(para, inner);
+}
+
+fn render_welcome_popup(f: &mut Frame, area: Rect) {
+    let popup_width = area.width.min(60);
+    let popup_height = 14;
+    let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let popup_y = area.y + (area.height.saturating_sub(popup_height)) / 2;
+
+    let popup_rect = Rect::new(popup_x, popup_y, popup_width, popup_height);
+    f.render_widget(Clear, popup_rect);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Double)
+        .border_style(Style::new().fg(BRIGHT_GREEN).bg(BG))
+        .title(Line::from(Span::styled(
+            " 🚀 WELCOME TO CMDSTR ",
+            Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD),
         )))
         .style(Style::new().bg(BG));
 
@@ -589,87 +719,33 @@ fn render_help_popup(f: &mut Frame, area: Rect) {
     f.render_widget(block, popup_rect);
 
     let content = vec![
+        Line::from(""),
+        Line::from(Span::styled("  Smart Command Storage & Recall", Style::new().fg(GREEN).bg(BG).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled("  ──────────────────────────────", Style::new().fg(DARK_GREEN).bg(BG))),
+        Line::from("  No commands captured in this session yet."),
+        Line::from(""),
         Line::from(vec![
-            Span::styled(" Navigation ", Style::new().fg(YELLOW).bg(BG).add_modifier(Modifier::BOLD)),
-            Span::styled(" │ ", dim_style(false)),
-            Span::styled(" Output ", Style::new().fg(YELLOW).bg(BG).add_modifier(Modifier::BOLD)),
+            Span::styled("  1. ", Style::new().fg(YELLOW).bg(BG).add_modifier(Modifier::BOLD)),
+            Span::styled("Run commands in your terminal to auto-capture.", Style::new().fg(GREEN).bg(BG)),
         ]),
         Line::from(vec![
-            Span::styled("  ↑/↓ j/k", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
-            Span::styled("  Move    ", dim_style(false)),
-            Span::styled(" │ ", dim_style(false)),
-            Span::styled("Ctrl+↑/↓", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
-            Span::styled(" Scroll", dim_style(false)),
+            Span::styled("  2. ", Style::new().fg(YELLOW).bg(BG).add_modifier(Modifier::BOLD)),
+            Span::styled("Press ", Style::new().fg(GREEN).bg(BG)),
+            Span::styled("?", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
+            Span::styled(" or ", Style::new().fg(GREEN).bg(BG)),
+            Span::styled("F1", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
+            Span::styled(" to view available keybindings.", Style::new().fg(GREEN).bg(BG)),
         ]),
         Line::from(vec![
-            Span::styled("  g", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
-            Span::styled("          Top     ", dim_style(false)),
-            Span::styled(" │ ", dim_style(false)),
-            Span::styled("PgUp/Dn", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
-            Span::styled("  Jump 5", dim_style(false)),
-        ]),
-        Line::from(vec![
-            Span::styled("  G", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
-            Span::styled("          Bottom", dim_style(false)),
-        ]),
-        Line::from(vec![Span::styled("", dim_style(false))]),
-        Line::from(vec![
-            Span::styled(" Commands ", Style::new().fg(YELLOW).bg(BG).add_modifier(Modifier::BOLD)),
-            Span::styled(" │ ", dim_style(false)),
-            Span::styled(" Modes ", Style::new().fg(YELLOW).bg(BG).add_modifier(Modifier::BOLD)),
-        ]),
-        Line::from(vec![
-            Span::styled("  Enter", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
-            Span::styled("      Run cmd    ", dim_style(false)),
-            Span::styled(" │ ", dim_style(false)),
+            Span::styled("  3. ", Style::new().fg(YELLOW).bg(BG).add_modifier(Modifier::BOLD)),
+            Span::styled("Press ", Style::new().fg(GREEN).bg(BG)),
             Span::styled("r", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
-            Span::styled("       Run", dim_style(false)),
+            Span::styled(" to execute a custom command now.", Style::new().fg(GREEN).bg(BG)),
         ]),
-        Line::from(vec![
-            Span::styled("  S", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
-            Span::styled("          Sudo     ", dim_style(false)),
-            Span::styled(" │ ", dim_style(false)),
-            Span::styled("w", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
-            Span::styled("       Add", dim_style(false)),
-        ]),
-        Line::from(vec![
-            Span::styled("  ? / F1", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
-            Span::styled("     Help     ", dim_style(false)),
-            Span::styled(" │ ", dim_style(false)),
-            Span::styled("/ or s", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
-            Span::styled("  Search", dim_style(false)),
-        ]),
-        Line::from(vec![
-            Span::styled("                     ", dim_style(false)),
-            Span::styled(" │ ", dim_style(false)),
-            Span::styled("t", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
-            Span::styled("       Tag", dim_style(false)),
-        ]),
-        Line::from(vec![
-            Span::styled("", dim_style(false)),
-            Span::styled(" │ ", dim_style(false)),
-            Span::styled("n / a", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
-            Span::styled("     Note", dim_style(false)),
-        ]),
-        Line::from(vec![Span::styled("", dim_style(false))]),
-        Line::from(vec![
-            Span::styled(" Manage ", Style::new().fg(YELLOW).bg(BG).add_modifier(Modifier::BOLD)),
-        ]),
-        Line::from(vec![
-            Span::styled("  b", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
-            Span::styled("          Bookmark", dim_style(false)),
-        ]),
-        Line::from(vec![
-            Span::styled("  d", Style::new().fg(BRIGHT_GREEN).bg(BG).add_modifier(Modifier::BOLD)),
-            Span::styled("          Delete", dim_style(false)),
-        ]),
-        Line::from(vec![Span::styled("", dim_style(false))]),
-        Line::from(vec![
-            Span::styled("  [Esc] Close", Style::new().fg(RED).bg(BG).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(""),
+        Line::from(Span::styled("  [ Press any key to start exploring ]", Style::new().fg(YELLOW).bg(BG).add_modifier(Modifier::DIM))),
     ];
 
-    let para = Paragraph::new(Text::from(content))
-        .style(Style::new().bg(BG));
+    let para = Paragraph::new(Text::from(content)).style(Style::new().bg(BG));
     f.render_widget(para, inner);
 }

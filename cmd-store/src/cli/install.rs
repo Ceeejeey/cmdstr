@@ -4,13 +4,26 @@ use std::fs;
 use std::path::PathBuf;
 
 #[derive(Args)]
+#[command(
+    about = "Safely register and install shell capture hooks",
+    long_about = "Automatically configures shell startup profiles to load the background execution tracker hook. \
+                  Supported shells include Bash, Zsh, and Fish. It detects your current active shell \
+                  environment and writes/appends configuration to ~/.bashrc, ~/.zshrc, or ~/.config/fish/config.fish.",
+    after_help = "💡 EXAMPLES & CONFIGS:\n\n  \
+       1. Install hook with automatic shell detection (recommended):\n     \
+          $ cmdstr install\n\n  \
+       2. Explicitly install hook for Zsh shell:\n     \
+          $ cmdstr install --shell zsh\n\n  \
+       3. Specify custom absolute bin path for hook target:\n     \
+          $ cmdstr install --bin-path \"/usr/local/bin/cmdstr\""
+)]
 pub struct InstallArgs {
-    /// Shell type (auto-detect by default)
-    #[arg(short, long)]
+    /// Target shell profile type (auto-detect if omitted)
+    #[arg(short, long, help = "Configure hooks explicitly for zsh, bash, or fish shell")]
     pub shell: Option<String>,
 
-    /// Custom binary path
-    #[arg(long)]
+    /// Custom target binary path
+    #[arg(long, help = "Custom absolute binary/executable file path target for the hook to invoke")]
     pub bin_path: Option<String>,
 }
 
@@ -35,7 +48,7 @@ pub fn execute(args: &InstallArgs) -> Result<()> {
     let rc_path = rc_path_for_shell(&shell)?;
     let existing = fs::read_to_string(&rc_path).unwrap_or_default();
 
-    if existing.contains("cmdstr hook") {
+    if existing.contains("cmdstr hook") || existing.contains("__cmdstr_session_id") {
         println!("Hook already installed in {}", rc_path.display());
         return Ok(());
     }
@@ -74,15 +87,25 @@ fn rc_path_for_shell(shell: &str) -> Result<PathBuf> {
 fn generate_bash_hook(bin: &str) -> String {
     format!(
         r##"
-# cmdstr: smart command storage
+# ── cmdstr hook ──────────────────────────────────────────────
+# Auto-capture commands. Works in vanilla bash (no bash-preexec needed).
 __cmdstr_session_id="$(uuidgen 2>/dev/null || echo $$-$(date +%s))"
+__cmdstr_cmd=""
+__cmdstr_start=""
 
-cmdstr_preexec() {{
-    __cmdstr_cmd="$1"
+__cmdstr_preexec() {{
+    [ -n "$__cmdstr_cmd" ] && return
+    local cmd="$BASH_COMMAND"
+    case "$cmd" in
+        cmdstr\ capture*|__cmdstr_*|_cmdstr_*) return ;;
+    esac
+    local trimmed="${{cmd#"${{cmd%%[![:space:]]*}}"}}"
+    [ -z "$trimmed" ] && return
+    __cmdstr_cmd="$cmd"
     __cmdstr_start="$(date +%s%N)"
 }}
 
-cmdstr_precmd() {{
+__cmdstr_precmd() {{
     local exit_code=$?
     if [ -n "$__cmdstr_cmd" ]; then
         local end="$(date +%s%N)"
@@ -92,28 +115,70 @@ cmdstr_precmd() {{
     __cmdstr_cmd=""
 }}
 
-preexec_functions+=(cmdstr_preexec)
-precmd_functions+=(cmdstr_precmd)
+trap '__cmdstr_preexec' DEBUG
+if [[ "$PROMPT_COMMAND" != *"__cmdstr_precmd"* ]]; then
+    PROMPT_COMMAND="__cmdstr_precmd${{PROMPT_COMMAND:+;$PROMPT_COMMAND}}"
+fi
+# ── end cmdstr hook ──────────────────────────────────────────
 "##,
     )
 }
 
 fn generate_zsh_hook(bin: &str) -> String {
-    generate_bash_hook(bin)
+    format!(
+        r##"
+# ── cmdstr hook ──────────────────────────────────────────────
+# Auto-capture commands using native zsh hooks.
+__cmdstr_session_id="$(uuidgen 2>/dev/null || echo $$-$(date +%s))"
+
+autoload -Uz add-zsh-hook
+
+__cmdstr_preexec() {{
+    local cmd="$1"
+    case "$cmd" in
+        cmdstr\ capture*|__cmdstr_*|_cmdstr_*) return ;;
+    esac
+    local trimmed="${{cmd#"${{cmd%%[![:space:]]*}}"}}"
+    [ -z "$trimmed" ] && return
+    __cmdstr_cmd="$cmd"
+    __cmdstr_start="$(date +%s%N)"
+}}
+
+__cmdstr_precmd() {{
+    local exit_code=$?
+    if [ -n "$__cmdstr_cmd" ]; then
+        local end="$(date +%s%N)"
+        local duration=$(( (end - __cmdstr_start) / 1000000 ))
+        {bin} capture "$__cmdstr_cmd" "$exit_code" "$duration" "$PWD" "$__cmdstr_session_id" 2>/dev/null || true
+    fi
+    __cmdstr_cmd=""
+}}
+
+add-zsh-hook preexec __cmdstr_preexec
+add-zsh-hook precmd __cmdstr_precmd
+# ── end cmdstr hook ──────────────────────────────────────────
+"##,
+    )
 }
 
 fn generate_fish_hook(bin: &str) -> String {
     format!(
         r##"
-# cmdstr: smart command storage
+# ── cmdstr hook ──────────────────────────────────────────────
+# Auto-capture commands using fish events.
 set -g __cmdstr_session_id (uuidgen 2>/dev/null; or echo $fish_pid-(date +%s))
 
-function cmdstr_preexec --on-event fish_preexec
-    set -g __cmdstr_cmd $argv[1]
+function __cmdstr_preexec --on-event fish_preexec
+    set -l cmd $argv[1]
+    string match -q 'cmdstr capture*' -- $cmd; and return
+    string match -q '__cmdstr_*' -- $cmd; and return
+    set -l trimmed (string trim -- $cmd)
+    test -z "$trimmed"; and return
+    set -g __cmdstr_cmd $cmd
     set -g __cmdstr_start (date +%s%N)
 end
 
-function cmdstr_precmd --on-event fish_postexec
+function __cmdstr_precmd --on-event fish_postexec
     set -l exit_code $status
     if set -q __cmdstr_cmd
         set -l end (date +%s%N)
@@ -122,6 +187,7 @@ function cmdstr_precmd --on-event fish_postexec
     end
     set -e __cmdstr_cmd
 end
+# ── end cmdstr hook ──────────────────────────────────────────
 "##,
     )
 }
@@ -140,10 +206,10 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_bash_hook_contains_preexec() {
+    fn test_generate_bash_hook_contains_debug_trap() {
         let hook = generate_bash_hook("cmdstr");
-        assert!(hook.contains("cmdstr_preexec()"));
-        assert!(hook.contains("cmdstr_precmd()"));
+        assert!(hook.contains("trap '__cmdstr_preexec' DEBUG"));
+        assert!(hook.contains("PROMPT_COMMAND"));
     }
 
     #[test]
@@ -153,8 +219,33 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_zsh_same_as_bash() {
-        assert_eq!(generate_zsh_hook("cmdstr"), generate_bash_hook("cmdstr"));
+    fn test_generate_bash_hook_self_filter() {
+        let hook = generate_bash_hook("cmdstr");
+        assert!(hook.contains("cmdstr\\ capture*"));
+    }
+
+    #[test]
+    fn test_generate_zsh_hook_contains_bin() {
+        let hook = generate_zsh_hook("/usr/local/bin/cmdstr");
+        assert!(hook.contains("/usr/local/bin/cmdstr capture"));
+    }
+
+    #[test]
+    fn test_generate_zsh_hook_uses_native_hooks() {
+        let hook = generate_zsh_hook("cmdstr");
+        assert!(hook.contains("autoload -Uz add-zsh-hook"));
+        assert!(hook.contains("add-zsh-hook preexec __cmdstr_preexec"));
+        assert!(hook.contains("add-zsh-hook precmd __cmdstr_precmd"));
+    }
+
+    #[test]
+    fn test_generate_zsh_hook_differs_from_bash() {
+        // Zsh should use add-zsh-hook, not DEBUG trap
+        let zsh = generate_zsh_hook("cmdstr");
+        let bash = generate_bash_hook("cmdstr");
+        assert!(zsh.contains("add-zsh-hook"));
+        assert!(!zsh.contains("trap '__cmdstr_preexec' DEBUG"));
+        assert!(bash.contains("trap '__cmdstr_preexec' DEBUG"));
     }
 
     #[test]
@@ -168,6 +259,13 @@ mod tests {
         let hook = generate_fish_hook("cmdstr");
         assert!(hook.contains("--on-event fish_preexec"));
         assert!(hook.contains("--on-event fish_postexec"));
+    }
+
+    #[test]
+    fn test_generate_fish_hook_self_filter() {
+        let hook = generate_fish_hook("cmdstr");
+        assert!(hook.contains("cmdstr capture"));
+        assert!(hook.contains("__cmdstr_"));
     }
 
     #[test]
@@ -226,9 +324,11 @@ mod tests {
     #[test]
     fn test_hooks_contain_cmdstr_comment() {
         let bash = generate_bash_hook("cmdstr");
+        let zsh = generate_zsh_hook("cmdstr");
         let fish = generate_fish_hook("cmdstr");
-        assert!(bash.contains("# cmdstr: smart command storage"));
-        assert!(fish.contains("# cmdstr: smart command storage"));
+        assert!(bash.contains("# ── cmdstr hook"));
+        assert!(zsh.contains("# ── cmdstr hook"));
+        assert!(fish.contains("# ── cmdstr hook"));
     }
 
     fn restore_env(name: &str, old: Option<String>) {

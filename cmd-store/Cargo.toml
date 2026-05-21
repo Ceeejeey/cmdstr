@@ -1,6 +1,6 @@
 [package]
 name = "cmdstr"
-version = "0.1.3"
+version = "0.1.6"
 edition = "2021"
 description = "Smart command storage and recall for the terminal"
 authors = ["Gihan Vimukthi <gihanvimukthi19@gmail.com>"]

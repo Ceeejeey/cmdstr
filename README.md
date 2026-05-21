@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**cmdstr** is a smart command storage and recall tool for the terminal. It automatically captures every command you run, stores it in a local SQLite database, and lets you search, tag, annotate, bookmark, and re-run commands with ease. It also ships with a hacker-themed interactive TUI for browsing and managing your command history.
+**cmdstr** is a smart command storage and recall tool for the terminal. It automatically captures every command you run, stores it in a local SQLite database, and lets you search, tag, annotate, bookmark, and re-run commands with ease. It also ships with a premium hacker-themed interactive TUI for browsing and managing your command history.
 
 Never lose that complicated `ffmpeg` incantation or that perfect `docker` command again.
 
@@ -10,17 +10,17 @@ Never lose that complicated `ffmpeg` incantation or that perfect `docker` comman
 
 ## Features
 
-- **Auto-capture** — every command, exit code, duration, working directory, and hostname
-- **Full-text search** — fuzzy search commands, tags, and notes
-- **Tagging** — organise commands with tags (`cmdstr tag <id> docker,ffmpeg`)
-- **Annotations** — add notes or bookmark favourites
-- **Statistics** — total commands, unique commands, failure rate, top tags, most frequent commands
-- **Export** — JSON or CSV export of your entire history
-- **Direct execution** — tag a command and run it later with `cmdstr run <tag>` or just `cmdstr <tag>`
-- **Interactive TUI** — hacker-themed terminal UI to browse, search, run, tag, and manage commands with sudo mode and suspend/resume execution
-- **60+ automated tests** — CI-ready test suite covering capture, tagging, annotations, search, export, stats, and shell hooks
-- **Shell integration** — bash, zsh, and fish hooks for automatic capture (install via `cmdstr install`)
-- **XDG-compliant** — data stored at `$XDG_DATA_HOME/cmdstr/commands.db`
+- **Auto-capture** — every command, exit code, duration, working directory, and hostname.
+- **Robust Self-Filtering Shell Hooks** — Includes self-filtering logic for Bash, Zsh, and Fish that ignores `cmdstr` commands and whitespace inputs to prevent loop capturing.
+- **Flexible Tagging UX** — Search and tag commands using a 26-character ID, a short-ID prefix, or any substring matching the command text.
+- **Input Validation** — Prevents command history clutter by rejecting empty and whitespace-only command records.
+- **Full-text search** — fuzzy search commands, tags, and notes.
+- **Annotations** — add explanatory notes or bookmark favourites.
+- **Statistics & Analytics** — View unique execution counts, success ratios, bookmark distributions, and timeframes.
+- **Export** — Export history cleanly to pretty JSON or standard CSV.
+- **Direct execution** — tag a command and run it later with `cmdstr run <tag>` or just `cmdstr <tag>`.
+- **Interactive TUI Overhaul** — Premium hacker-themed terminal UI dashboard with active panel border highlighting, focus cycling, first-run welcome screen overlays, inline hints, clipboard copy support, and a comprehensive on-screen manual popup.
+- **TUI Help & Manual Popup** — Press `?` or `F1` in the TUI to access a dynamically-sized, clean, categorized manual with Navigation, Actions, Organization, and Tools guides.
 
 ---
 
@@ -65,53 +65,52 @@ sudo cp target/release/cmdstr /usr/local/bin/
 cmdstr install
 ```
 
-This auto-detects your shell and adds the capture hook to `~/.bashrc`, `~/.zshrc`, or `~/.config/fish/config.fish`. Restart your shell or source the file to start capturing.
+This auto-detects your active shell (Bash, Zsh, or Fish) and installs highly optimized hook scripts in `~/.bashrc`, `~/.zshrc`, or `~/.config/fish/config.fish` with loop-prevention filters. Restart your shell or source the profile to activate.
 
 ---
 
 ## Quick Start
 
 ```bash
-# Show help
+# Show comprehensive global help and master workflow examples
 cmdstr --help
 
-# Check version
-cmdstr --version
+# Show help for a specific command
+cmdstr tag --help
+cmdstr search --help
 
 # Search your command history
 cmdstr search docker
 
-# Tag a command (find its ID via search, then tag it)
-cmdstr search nginx
-# -> 01ARZ3N... │ ✓ 2026-05-17T12:00:00 │ sudo systemctl start nginx
-cmdstr tag 01ARZ3N nginx,systemd
+# Tag a command (by ID, short ID, or any command substring)
+cmdstr tag "docker run -d nginx" webserver,nginx
 
-# Run a tagged command
-cmdstr run nginx
-# Or just:
-cmdstr nginx
+# Run a tagged command (prompts for confirmation before running)
+cmdstr run webserver
+# Or shorthand:
+cmdstr webserver
 
-# Launch the interactive TUI
+# Launch the premium interactive TUI
 cmdstr tui
 
-# See your stats
+# View analytics and usage stats
 cmdstr stats
 ```
 
 ---
 
-## Commands
+## Commands & CLI Documentation
+
+Every command in the `cmdstr` tool is fully documented with a descriptive `long_about` and practical command examples.
 
 ### `capture` — Capture a command
-
-Called automatically by shell hooks. Records a command, its exit code, duration, working directory, and session ID.
-
+Called automatically by shell hooks. Records a command, its exit code, duration, working directory, hostname, and session ID. Empty or whitespace commands are automatically filtered out.
 ```bash
 cmdstr capture "docker ps -a" 0 234 /home/user abc123-session
 ```
 
-### `add` — Manually add a command
-
+### `add` — Manually record a command snippet
+Saves a command snippet directly into history without running it. Useful for preserving command templates or scripts.
 ```bash
 cmdstr add "sudo systemctl restart nginx" --tag nginx,systemd --note "Restart after config change"
 cmdstr add "curl -s https://api.example.com" --tag api,testing
@@ -120,246 +119,169 @@ cmdstr add "curl -s https://api.example.com" --tag api,testing
 | Flag | Description |
 |------|-------------|
 | `-t, --tag` | Comma-separated tags |
-| `-n, --note` | Annotation note |
+| `-n, --note` | Explanation note or description |
 | `--exit-code` | Exit code (default: 0) |
-| `--duration` | Duration in ms (default: 0) |
+| `--duration` | Run duration in ms (default: 0) |
 
-### `search` / `list` — Search and list commands
-
+### `search` / `list` — Search and filter history
+Fuzzy matches commands, tags, and annotations. Outputs formatted tables or pretty JSON array structures.
 ```bash
-# Basic search
+# Search for keyword anywhere in command strings
 cmdstr search docker
-cmdstr list docker
 
-# Filter by tag
+# Filter commands by specific tag name
 cmdstr search --tag nginx
 
-# Last 24 hours
-cmdstr search --last 24
+# Show failed commands from the last 24 hours
+cmdstr search --failed --last 24
 
-# Only failed commands
-cmdstr search --failed
-
-# Most frequent commands
-cmdstr search --freq
-
-# Bookmarked commands only
+# List bookmarked commands only
 cmdstr search --bookmarks
 
-# JSON output
-cmdstr search docker --json
-
-# Limit results
-cmdstr search docker --limit 10
+# List command frequencies (execution counts)
+cmdstr search --freq
 ```
 
 | Flag | Description |
 |------|-------------|
-| `query` | Search term (fuzzy match) |
-| `-t, --tag` | Filter by tag name |
-| `--last` | Only commands from last N hours |
-| `--failed` | Only failed commands (exit code ≠ 0) |
-| `--freq` | Show most frequent commands |
-| `--bookmarks` | Bookmarked commands only |
-| `-l, --limit` | Max results (default: 30) |
-| `--json` | JSON output |
+| `query` | Fuzzy match keyword query |
+| `-t, --tag` | Filter by specific tag name |
+| `--last` | Only show commands from last N hours |
+| `--failed` | Only show failed commands (exit_code != 0) |
+| `--freq` | Show command frequency stats |
+| `--bookmarks` | Show bookmarked commands only |
+| `-l, --limit` | Limit results (default: 30) |
+| `--json` | Format output as pretty JSON |
 
 ### `tag` — Tag a stored command
-
+Binds tag names to a command. Locate commands via:
+1. Exact 26-character ULID (ID)
+2. Short ID prefix (e.g. first 8 characters of ID)
+3. Raw command text string (exact or substring matched; resolves to the most recent run if multiple exist)
 ```bash
-cmdstr tag <command-id> docker,compose,dev
+# Tag by exact ID
+cmdstr tag 01H6W4A5G6C8D9E8F7A6B5C4D3 docker,dev
+
+# Tag by short ID prefix
+cmdstr tag 01H6W4A5 quickstart
+
+# Tag by command text substring
+cmdstr tag "ffmpeg -i input.mp4" video,ffmpeg
 ```
 
-Tags are **comma-separated** and stored in lowercase.
-
-### `annotate` / `note` — Add a note or bookmark
-
+### `annotate` / `note` — Annotate and Bookmark
+Add explanatory descriptions or bookmark specific commands to highlight them.
 ```bash
-cmdstr annotate <command-id> "Restart the web server after config changes"
-cmdstr note <command-id> "My favourite command" --bookmark
+cmdstr annotate 01H6W4A5 "Starts Next.js dev server"
+cmdstr note 01H6W4A5 "Key deployment script" --bookmark
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--bookmark` | Also mark as bookmark |
+| `--bookmark` | Mark target command as bookmark |
 
-### `stats` — Show statistics
-
+### `stats` — Analytics & History aggregates
 ```bash
 cmdstr stats
 cmdstr stats --json
 ```
 
-Displays:
-- Total commands captured
-- Unique commands
-- Bookmarks
-- Failure rate
-- Commands today
-- Top tags
-- Most frequent commands
-
-### `install` — Install shell hooks
-
+### `install` — Configure shell capture hooks
 ```bash
-# Auto-detect shell
 cmdstr install
-
-# Specify shell
 cmdstr install --shell zsh
-
-# Custom binary path
 cmdstr install --bin-path /usr/local/bin/cmdstr
 ```
 
-| Flag | Description |
-|------|-------------|
-| `-s, --shell` | Shell type: `bash`, `zsh`, or `fish` |
-| `--bin-path` | Custom path to cmdstr binary |
-
-### `export` — Export to JSON or CSV
-
+### `export` — Export database records
+Redirections output to standard output or a specified target file.
 ```bash
-# JSON to stdout
-cmdstr export
-
-# CSV to file
-cmdstr export --format csv --output history.csv
-
-# JSON to file
-cmdstr export --output history.json
+cmdstr export --format json
+cmdstr export --format csv --output ~/history_backup.csv
 ```
 
-| Flag | Description |
-|------|-------------|
-| `-f, --format` | Output format: `json` or `csv` (default: json) |
-| `-o, --output` | Output file path (stdout if not set) |
-
-### `run` — Run a tagged command
-
+### `run` — Execute a tagged command
+Locates the command matching the tag and safely prompts you before executing it.
 ```bash
-cmdstr run docker
+cmdstr run webserver
+# Or shorthand:
+cmdstr webserver
 ```
 
-Looks up the most recent command tagged with `docker` and executes it via `sh -c`.
+---
 
-**Shorthand:** you can omit `run` and just pass the tag directly:
+## Interactive TUI (`cmdstr tui`)
 
-```bash
-cmdstr docker
-```
-
-### `tui` / `dashboard` — Interactive TUI
-
+Launch our premium hacker-themed dashboard to explore history dynamically:
 ```bash
 cmdstr tui
 ```
 
-Launches a hacker-themed terminal UI for browsing, searching, running, tagging, and managing your command history interactively.
+### Premium UI Overhaul Additions
+* **Active Panel Highlighting**: Active borders glow in vibrant green (or red in elevated mode), while inactive panel borders are dimmed to direct your attention.
+* **Focus Cycling**: Use `Tab` to cycle active focus between the Command List and Details/Output panels. Navigation keys (`j`/`k`, `g`/`G`) automatically switch functions depending on the active focus.
+* **Clipboard copy**: Press `c` on any selected command in the list to instantly copy it to your system clipboard.
+* **Welcome Screen Overlay**: First-run experience that overlays beautiful startup instructions when your database is empty.
+* **Inline Input Placeholders**: Interactive input modes display italicized gray placeholder hints (e.g. search guides, comma-separated tags, note details, or password indicators) that fade out as you type.
+* **TUI Help & Manual Popup**: Press `?` or `F1` to reveal a dynamically-sized manual detailing advanced keybindings, navigation, database actions, and quick utility tools.
 
-The TUI shows a split view: a **command list** on top with `▸` pointer, `✓`/`✗` status, and `★` bookmark marker, and an **output panel** below displaying captured command output with a scroll bar, alternating line colours, and a `5:42`-style line counter.
+### TUI Keybindings & Controls
 
 #### Navigation & Selection
+| Key | Focused Panel: Command List | Focused Panel: Details/Output |
+|-----|-----------------------------|-------------------------------|
+| `Tab` | Switch focus to Details Panel | Switch focus to Command List |
+| `↑` / `↓` or `j` / `k` | Navigate command list | Scroll output log up/down |
+| `Ctrl+↑` / `Ctrl+↓` | Scroll output log up/down | Scroll output log up/down |
+| `PageUp` / `PageDown` | Scroll output by 5 lines | Scroll output by 5 lines |
+| `g` / `G` | Jump to Top / Bottom of list | Scroll to Top / Bottom of log |
+| `?` / `F1` | Open TUI Manual Popup | Open TUI Manual Popup |
 
+#### Command Executions
 | Key | Action |
 |-----|--------|
-| `↑` / `↓` or `j` / `k` | Navigate command list |
-| `g` | Go to top of list |
-| `G` | Go to bottom of list |
-| `Ctrl+↑` / `Ctrl+↓` | Scroll output up / down |
-| `PageUp` / `PageDown` | Scroll output by 5 lines |
-| `?` / `F1` | Show help popup (dismiss with `Esc`) |
+| `Enter` | Run selected command |
+| `r` | Run an arbitrary user command |
+| `S` | Toggle **Sudo Mode** (switches TUI to red-on-black, prefixes run commands with `sudo`) |
 
-The help bar at the bottom shows a compact summary of available actions.
-
-#### Running Commands
-
+#### Database Actions
 | Key | Action |
 |-----|--------|
-| `Enter` | Run the selected command |
-| `r` | Type and run an arbitrary command |
-| `S` | Toggle **sudo mode** (red theme, all commands prefixed with `sudo`) |
+| `/` or `s` | Search / filter history (filters on text, tags, and notes) |
+| `t` | Add / edit tags for selected command |
+| `n` or `a` | Add / edit note for selected command |
+| `b` | Toggle bookmark flag (`★`) |
+| `d` | Delete selected command |
+| `w` | Manually record command to store (capture without executing) |
+| `i` | View history analytics and usage statistics in output pane |
+| `e` | Export entire command history to `~/cmdstr_export.json` |
 
-Commands run in a real PTY via `script(1)` — interactive prompts (like `apt upgrade`) work fully, and all output is captured and displayed in the output panel after the command finishes.
-
-#### Sudo & Password Popup
-
-When sudo mode is toggled (`S`), the UI switches to a **red-on-black hacker theme**. Pressing `Enter` on a command while in sudo mode:
-
-1. Shows a password popup with masked input (`••••`)
-2. **Caches sudo credentials** via `sudo -S -v` (password sent over a secure pipe)
-3. Runs the command with full `sudo` privileges
-4. Captures the output for display
-
-#### Managing Commands
-
+#### Exit Controls
 | Key | Action |
 |-----|--------|
-| `/` or `s` | Search / filter commands |
-| `t` | Tag the selected command |
-| `n` / `a` | Add a note to the selected command |
-| `b` | Toggle bookmark (`★`) |
-| `d` | Delete the selected command |
-| `w` | Manually add a command to the store (capture without running) |
-
-All actions save immediately to the SQLite database.
-
-#### Quitting
-
-| Key | Action |
-|-----|--------|
-| `q` | Quit the TUI |
-| `Ctrl+C` | Quit from any mode |
-| `Esc` | Cancel current input / close popup |
-
-#### How Command Execution Works
-
-The TUI suspends itself before running external commands, with visual transition cues:
-
-1. **Brief in-TUI status** — shows `Running: <cmd>` for 100ms so you see what's about to run
-2. **Suspends the TUI** — leaves alternate screen, disables raw mode, shows cursor
-3. **Transition banner** — displays a green `━━━ cmdstr ── Running: <cmd> ───` banner on the main screen
-4. **Executes via `script(1)`** — the command runs inside a real PTY so interactive apps (`apt`, `vim`, `htop`) work fully, while output is captured to a temp file
-5. **Post-command cleanup** — `stty sane` restores any terminal state changes the command may have left
-6. **Done banner** — shows `━━━ cmdstr ── Done (exit: N) ───` for at least 300ms so fast commands don't blink past
-7. **Resumes the TUI** — re-enters alternate screen, re-enables raw mode, hides cursor
-8. **Displays captured output** — ANSI escape codes are stripped, `\r` / `\r\n` line endings are normalised, and `script(1)` recording headers/footers are removed
-
-This approach handles everything from `echo hello` to `apt upgrade` and `vim` without crashing or corrupting the TUI state.
+| `Esc` | Clear active search filter, cancel current input, or dismiss popup |
+| `q` | Quit TUI dashboard safely |
+| `Ctrl+C` | Instant quit from any active mode |
 
 ---
 
-## Shell Integration
-
-### Manual setup
-
-If you prefer not to use `cmdstr install`, source the hook scripts directly:
-
-**Bash:**
-```bash
-source /path/to/cmdstr/shell/bash.sh
-```
-
-**Zsh:**
-```zsh
-source /path/to/cmdstr/shell/zsh.sh
-```
-
-**Fish:**
-```fish
-source /path/to/cmdstr/shell/fish.fish
-```
+## Shell Integration Hooks
 
 ### How it works
-
-The shell hooks intercept every command via `preexec`/`precmd` (bash/zsh) or `fish_preexec`/`fish_postexec` events. They measure:
-- The exact command string
-- Start and end timestamps (nanosecond precision)
-- Exit code
+Startup hooks configure pre-execution traps or event registers based on shell environments. As commands complete, hooks query:
+- Target command text string
+- Start and end execution timestamps (nanosecond precision)
+- Process exit code status
 - Current working directory
-- A per-session unique ID
+- Per-session unique terminal ID
 
-This data is passed to `cmdstr capture` which stores it in the SQLite database. The hook runs **asynchronously** (`2>/dev/null || true`) so it never blocks or interferes with your terminal.
+Data is captured asynchronously (`2>/dev/null || true`) ensuring that `cmdstr` never blocks your shell or slows down operations.
+
+### Recursive capturing prevention
+All hooks incorporate self-filtering loops:
+* Bash: native trap matching ignores all inputs starting with `cmdstr` or whitespace elements.
+* Zsh: uses native `add-zsh-hook preexec` with immediate checks to bypass capturing recursive loops.
+* Fish: standard post-execution ignores inputs containing `cmdstr` structures.
 
 ---
 
@@ -370,62 +292,15 @@ cmdstr follows the [XDG Base Directory Specification](https://specifications.fre
 | Path | Purpose |
 |------|---------|
 | `$XDG_DATA_HOME/cmdstr/commands.db` | SQLite database |
-| `$XDG_CONFIG_HOME/cmdstr/config.toml` | Configuration (future use) |
+| `$XDG_CONFIG_HOME/cmdstr/config.toml` | Configuration settings |
 
 Defaults:
-- `$XDG_DATA_HOME` → `~/.local/share/`
-- `$XDG_CONFIG_HOME` → `~/.config/`
-
-### Database schema
-
-```
-commands       — id (ULID), command, cwd, exit_code, duration_ms, session_id, hostname, captured_at
-tags           — id, name (unique)
-command_tags   — command_id → commands.id, tag_id → tags.id
-annotations    — command_id → commands.id, note, is_bookmark
-command_freq   — command_hash, command, count
-```
+- `$XDG_DATA_HOME` -> `~/.local/share/`
+- `$XDG_CONFIG_HOME` -> `~/.config/`
 
 ---
 
-## Use Cases
-
-### Recover that one command you ran yesterday
-
-```bash
-cmdstr search --last 48
-```
-
-### Organise complex one-liners
-
-```bash
-cmdstr search ffmpeg
-cmdstr tag <id> ffmpeg,video,convert
-# Later:
-cmdstr ffmpeg
-```
-
-### Debug recurring failures
-
-```bash
-cmdstr search --failed
-```
-
-### Track your most-used tools
-
-```bash
-cmdstr search --freq
-```
-
-### Interactive exploration
-
-```bash
-cmdstr tui
-```
-
----
-
-## Building
+## Building & Development
 
 ```bash
 # Debug build
@@ -434,41 +309,15 @@ cargo build
 # Release build
 cargo build --release
 
-# Run test suite (60+ tests)
+# Run comprehensive test suite (70+ unit/integration tests)
 cargo test
 
-# Check lints
+# Check code formatting & warnings
 cargo clippy
-
-# Debian package (requires cargo-deb)
-cargo install cargo-deb
-cargo deb
-
-# For PPA upload (requires devscripts and dh-cargo)
-# Install build dependencies:
-sudo apt install devscripts debhelper dh-cargo cargo rustc
-
-# Build source package:
-debuild -S -sa
 ```
 
 ---
 
-## Uninstall
+## License
 
-```bash
-# Remove the binary
-sudo rm /usr/local/bin/cmdstr
-
-# Remove the database and config
-rm -rf ~/.local/share/cmdstr
-rm -rf ~/.config/cmdstr
-
-# Remove shell hooks (edit your .bashrc/.zshrc/config.fish and delete the cmdstr block)
-```
-
----
-
-## Licence
-
-MIT — see [LICENCE](LICENSE).
+MIT — see [LICENSE](LICENSE).

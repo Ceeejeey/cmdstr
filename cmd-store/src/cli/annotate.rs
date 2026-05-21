@@ -5,15 +5,29 @@ use clap::Args;
 use rusqlite::Connection;
 
 #[derive(Args)]
+#[command(
+    about = "Annotate a command with descriptive explanation notes and bookmarks",
+    long_about = "Attaches user notes or labels to a command, making it easy to explain what the command \
+                  does for future recall. Also supports bookmarking key commands to filter on them easily.",
+    after_help = "💡 EXAMPLES:\n\n  \
+       1. Add an annotation note to a command by ID:\n     \
+          $ cmdstr annotate 01H6W4A5 \"Starts nextjs server in development mode\"\n\n  \
+       2. Mark a command as a bookmark without notes:\n     \
+          $ cmdstr annotate 01H6W4A5 \"\" --bookmark\n\n  \
+       3. Bookmark and add descriptive note in one go:\n     \
+          $ cmdstr annotate 01H6W4A5 \"Production postgres dump script\" --bookmark"
+)]
 pub struct AnnotateArgs {
-    /// Command ID
+    /// Target Command ID to annotate
+    #[arg(help = "The target command's ULID or ID prefix to attach the annotation note or bookmark to")]
     pub command_id: String,
 
-    /// Annotation note
+    /// Explanatory note or description
+    #[arg(help = "Detailed annotation notes describing command behavior")]
     pub note: String,
 
-    /// Mark as bookmark
-    #[arg(long)]
+    /// Flag command as a key bookmark
+    #[arg(long, help = "Flag the command as a primary bookmark for fast lookup")]
     pub bookmark: bool,
 }
 

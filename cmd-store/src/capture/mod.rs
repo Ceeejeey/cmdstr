@@ -12,6 +12,11 @@ pub fn capture_command(
     cwd: &str,
     session_id: &str,
 ) -> Result<String> {
+    let trimmed = command.trim();
+    if trimmed.is_empty() {
+        anyhow::bail!("Command cannot be empty or whitespace-only");
+    }
+
     let db_path = paths::db_path()?;
     let conn = Connection::open(&db_path)?;
     schema::initialize(&conn)?;

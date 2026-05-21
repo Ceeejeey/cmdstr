@@ -713,6 +713,160 @@ fn test_delete_command_cascades_to_tags_and_annotations() {
     );
 }
 
+// ── New Integration Tests ──────────────────────────────────────────────────
+
+#[test]
+fn test_tag_by_command_text() {
+    let _g = TestEnv::guard();
+    let env = TestEnv::new();
+
+    let id = capture_test_command(&env, "sudo apt update");
+    let args = cli::tag::TagArgs {
+        command_id: "sudo apt update".to_string(),
+        tags: "sysupdate,apt".to_string(),
+    };
+    cli::tag::execute(&args).expect("tag by text execute");
+
+    let conn = env.db_connection();
+    let tags = cli::query::get_tags_for_command(&conn, &id).expect("get tags");
+    assert_eq!(tags.len(), 2);
+    assert!(tags.contains(&"sysupdate".to_string()));
+    assert!(tags.contains(&"apt".to_string()));
+}
+
+#[test]
+fn test_tag_by_command_text_partial_match() {
+    let _g = TestEnv::guard();
+    let env = TestEnv::new();
+
+    let id = capture_test_command(&env, "docker run -d nginx");
+    let args = cli::tag::TagArgs {
+        command_id: "docker run".to_string(),
+        tags: "web,docker".to_string(),
+    };
+    cli::tag::execute(&args).expect("tag by partial text execute");
+
+    let conn = env.db_connection();
+    let tags = cli::query::get_tags_for_command(&conn, &id).expect("get tags");
+    assert_eq!(tags.len(), 2);
+    assert!(tags.contains(&"web".to_string()));
+    assert!(tags.contains(&"docker".to_string()));
+}
+
+#[test]
+fn test_tag_by_command_text_no_match() {
+    let _g = TestEnv::guard();
+    let env = TestEnv::new();
+
+    capture_test_command(&env, "ls -la");
+    let args = cli::tag::TagArgs {
+        command_id: "nonexistent command text".to_string(),
+        tags: "test".to_string(),
+    };
+    assert!(cli::tag::execute(&args).is_err());
+}
+
+#[test]
+fn test_tag_by_id_still_works() {
+    let _g = TestEnv::guard();
+    let env = TestEnv::new();
+
+    let id = capture_test_command(&env, "cat cargo.toml");
+    let args = cli::tag::TagArgs {
+        command_id: id.clone(),
+        tags: "cargo,config".to_string(),
+    };
+    cli::tag::execute(&args).expect("tag by id execute");
+
+    let conn = env.db_connection();
+    let tags = cli::query::get_tags_for_command(&conn, &id).expect("get tags");
+    assert_eq!(tags.len(), 2);
+    assert!(tags.contains(&"cargo".to_string()));
+    assert!(tags.contains(&"config".to_string()));
+}
+
+#[test]
+fn test_tag_by_exact_command_match() {
+    let _g = TestEnv::guard();
+    let env = TestEnv::new();
+
+    let id_partial = capture_test_command(&env, "git commit -m 'fix bug'");
+    let id_exact = capture_test_command(&env, "git commit");
+
+    let args = cli::tag::TagArgs {
+        command_id: "git commit".to_string(),
+        tags: "vcs".to_string(),
+    };
+    cli::tag::execute(&args).expect("execute");
+
+    let conn = env.db_connection();
+    let tags_exact = cli::query::get_tags_for_command(&conn, &id_exact).expect("exact tags");
+    let tags_partial = cli::query::get_tags_for_command(&conn, &id_partial).expect("partial tags");
+
+    assert!(tags_exact.contains(&"vcs".to_string()));
+    assert!(tags_partial.is_empty());
+}
+
+#[test]
+fn test_find_command_by_text_returns_most_recent() {
+    let _g = TestEnv::guard();
+    let env = TestEnv::new();
+
+    let id_old = capture_test_command(&env, "npm run build");
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    let id_new = capture_test_command(&env, "npm run build");
+
+    let args = cli::tag::TagArgs {
+        command_id: "npm run build".to_string(),
+        tags: "node".to_string(),
+    };
+    cli::tag::execute(&args).expect("execute");
+
+    let conn = env.db_connection();
+    let tags_old = cli::query::get_tags_for_command(&conn, &id_old).expect("old tags");
+    let tags_new = cli::query::get_tags_for_command(&conn, &id_new).expect("new tags");
+
+    assert!(tags_old.is_empty());
+    assert!(tags_new.contains(&"node".to_string()));
+}
+
+#[test]
+fn test_capture_empty_command_rejected() {
+    let _g = TestEnv::guard();
+    let _env = TestEnv::new();
+
+    let res = cmd_store::capture::capture_command("", 0, 0, "", "");
+    assert!(res.is_err());
+}
+
+#[test]
+fn test_capture_whitespace_command_rejected() {
+    let _g = TestEnv::guard();
+    let _env = TestEnv::new();
+
+    let res = cmd_store::capture::capture_command("   \t  \n ", 0, 0, "", "");
+    assert!(res.is_err());
+}
+
+#[test]
+fn test_tag_args_resolves_short_id() {
+    let _g = TestEnv::guard();
+    let env = TestEnv::new();
+
+    let id = capture_test_command(&env, "short id tag test");
+    let short = &id[..8];
+
+    let args = cli::tag::TagArgs {
+        command_id: short.to_string(),
+        tags: "shorty".to_string(),
+    };
+    cli::tag::execute(&args).expect("execute");
+
+    let conn = env.db_connection();
+    let tags = cli::query::get_tags_for_command(&conn, &id).expect("get tags");
+    assert!(tags.contains(&"shorty".to_string()));
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────
 
 fn query_commands(conn: &Connection) -> Vec<(String, i32, i64, String)> {

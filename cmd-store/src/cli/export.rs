@@ -1,3 +1,4 @@
+use crate::cli::query::get_tags_for_command;
 use crate::config::paths;
 use crate::db::{models::Command, schema};
 use anyhow::Result;
@@ -5,13 +6,26 @@ use clap::Args;
 use rusqlite::Connection;
 
 #[derive(Args)]
+#[command(
+    about = "Export commands from the history store database",
+    long_about = "Reads all recorded commands along with metadata (tags, notes, exits, durations, hostnames, timestamps) \
+                  and formats them into structured JSON or standard CSV. Output is printed to stdout by default, \
+                  or redirected to a specified target file.",
+    after_help = "💡 EXAMPLES:\n\n  \
+       1. Export all history as pretty JSON to stdout:\n     \
+          $ cmdstr export --format json\n\n  \
+       2. Save all history as a structured CSV file:\n     \
+          $ cmdstr export --format csv --output ~/history_backup.csv\n\n  \
+       3. Export as JSON to a custom file:\n     \
+          $ cmdstr export -f json -o ~/backup.json"
+)]
 pub struct ExportArgs {
-    /// Output format: json or csv
-    #[arg(short, long, default_value = "json")]
+    /// Target export format type
+    #[arg(short, long, default_value = "json", help = "Output serialization format: json or csv")]
     pub format: String,
 
-    /// Output file (stdout if not specified)
-    #[arg(short, long)]
+    /// Absolute target file output path
+    #[arg(short, long, help = "Optional target file output path. Prints output to stdout if omitted")]
     pub output: Option<String>,
 }
 
@@ -29,11 +43,11 @@ pub fn execute(args: &ExportArgs) -> Result<()> {
          ORDER BY c.captured_at",
     )?;
 
-    let commands: Vec<Command> = stmt
+    let mut commands: Vec<Command> = stmt
         .query_map([], |row| {
             let id: String = row.get(0)?;
             let note: Option<String> = row.get(8)?;
-            let is_bookmark: bool = row.get(9)?;
+            let is_bookmark: Option<i32> = row.get(9)?;
 
             Ok(Command {
                 id,
@@ -46,11 +60,16 @@ pub fn execute(args: &ExportArgs) -> Result<()> {
                 captured_at: row.get(7)?,
                 tags: Vec::new(),
                 annotation: note,
-                is_bookmark,
+                is_bookmark: is_bookmark.unwrap_or(0) != 0,
             })
         })?
         .filter_map(|r| r.ok())
         .collect();
+
+    // Populate tags for each command
+    for cmd in &mut commands {
+        cmd.tags = get_tags_for_command(&conn, &cmd.id).unwrap_or_default();
+    }
 
     let output: String = match args.format.as_str() {
         "csv" => commands_to_csv(&commands),

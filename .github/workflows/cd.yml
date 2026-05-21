@@ -1,0 +1,48 @@
+name: CD
+
+on:
+  push:
+    # Trigger this workflow only when a new version tag is pushed (e.g., v0.1.4)
+    tags:
+      - 'v*.*.*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # 1. Publish binaries to GitHub Releases
+  github-release:
+    name: Build & Publish Release Binaries
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write # Required for creating GitHub Releases
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Release Binary
+        run: cargo build --release
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb
+
+      - name: Generate Debian Package (.deb)
+        # Assuming cargo-deb will read the [package.metadata.deb] section in Cargo.toml
+        run: cargo deb -p cmdstr
+
+      - name: Rename and compress standalone binaries
+        run: |
+          cd target/release/
+          tar -czvf ../../cmdstr-linux-amd64.tar.gz cmdstr
+
+      - name: Upload binaries to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            cmdstr-linux-amd64.tar.gz
+            target/debian/*.deb
+          generate_release_notes: true

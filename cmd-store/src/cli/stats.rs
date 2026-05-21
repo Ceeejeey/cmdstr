@@ -5,9 +5,20 @@ use clap::Args;
 use rusqlite::Connection;
 
 #[derive(Args)]
+#[command(
+    about = "Display analytics and statistics about your command history",
+    long_about = "Aggregates, computes, and prints statistics about command logs including total runs, \
+                  unique command count, bookmark counts, average command execution duration, success rates, \
+                  and most active directories.",
+    after_help = "💡 EXAMPLES:\n\n  \
+       1. View stats in a clean human-readable text format:\n     \
+          $ cmdstr stats\n\n  \
+       2. Output stats as a structured JSON object for dashboards or external integrations:\n     \
+          $ cmdstr stats --json"
+)]
 pub struct StatsArgs {
-    /// Output as JSON
-    #[arg(long)]
+    /// Format output as JSON
+    #[arg(long, help = "Format the analytics output into a structured JSON object")]
     pub json: bool,
 }
 

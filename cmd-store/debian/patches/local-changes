@@ -1,0 +1,1387 @@
+Description: <short summary of the patch>
+ TODO: Put a short summary on the line above and replace this paragraph
+ with a longer explanation of this change. Complete the meta-information
+ with other relevant fields (see below for details). To make it easier, the
+ information below has been extracted from the changelog. Adjust it or drop
+ it.
+ .
+ cmdstr (0.1.6-1) noble; urgency=medium
+ .
+   * Fix critical export bug, improve TUI help, add stats and export to
+     TUI.
+Author: Gihan Vimukthi <gihanvimukthi19@gmail.com>
+
+---
+The information above should follow the Patch Tagging Guidelines, please
+checkout https://dep.debian.net/deps/dep3/ to learn about the format. Here
+are templates for supplementary fields that you might want to add:
+
+Origin: (upstream|backport|vendor|other), (<patch-url>|commit:<commit-id>)
+Bug: <upstream-bugtracker-url>
+Bug-Debian: https://bugs.debian.org/<bugnumber>
+Bug-Ubuntu: https://launchpad.net/bugs/<bugnumber>
+Forwarded: (no|not-needed|<patch-forwarded-url>)
+Applied-Upstream: <version>, (<commit-url>|commit:<commid-id>)
+Reviewed-By: <name and email of someone who approved/reviewed the patch>
+Last-Update: 2026-05-21
+
+--- /dev/null
++++ cmdstr-0.1.6/vendor/cc/src/target/apple.rs
+@@ -0,0 +1,57 @@
++use super::TargetInfo;
++
++impl TargetInfo<'_> {
++    pub(crate) fn apple_sdk_name(&self) -> &'static str {
++        match (self.os, self.env) {
++            // The target_env variable, as written here:
++            // https://doc.rust-lang.org/reference/conditional-compilation.html#target_env
++            // is only really used for disambiguation, so we use a "default" case instead of
++            // checking for a blank string.
++            ("macos", _) => "macosx",
++            ("ios", "sim") => "iphonesimulator",
++            ("ios", "macabi") => "macosx",
++            ("ios", _) => "iphoneos",
++            ("tvos", "sim") => "appletvsimulator",
++            ("tvos", _) => "appletvos",
++            ("watchos", "sim") => "watchsimulator",
++            ("watchos", _) => "watchos",
++            ("visionos", "sim") => "xrsimulator",
++            ("visionos", _) => "xros",
++            (os, _) => panic!("invalid Apple target OS {}", os),
++        }
++    }
++
++    pub(crate) fn apple_version_flag(&self, min_version: &str) -> String {
++        // There are many aliases for these, and `-mtargetos=` is preferred on Clang nowadays, but
++        // for compatibility with older Clang, we use the earliest supported name here.
++        //
++        // NOTE: GCC does not support `-miphoneos-version-min=` etc. (because it does not support
++        // iOS in general), but we specify them anyhow in case we actually have a Clang-like
++        // compiler disguised as a GNU-like compiler, or in case GCC adds support for these in the
++        // future.
++        //
++        // See also:
++        // https://clang.llvm.org/docs/ClangCommandLineReference.html#cmdoption-clang-mmacos-version-min
++        // https://clang.llvm.org/docs/AttributeReference.html#availability
++        // https://gcc.gnu.org/onlinedocs/gcc/Darwin-Options.html#index-mmacosx-version-min
++        match (self.os, self.env) {
++            // The target_env variable, as written here:
++            // https://doc.rust-lang.org/reference/conditional-compilation.html#target_env
++            // is only really used for disambiguation, so we use a "default" case instead of
++            // checking for a blank string.
++            ("macos", _) => format!("-mmacosx-version-min={min_version}"),
++            ("ios", "sim") => format!("-mios-simulator-version-min={min_version}"),
++            ("ios", "macabi") => format!("-mtargetos=ios{min_version}-macabi"),
++            ("ios", _) => format!("-miphoneos-version-min={min_version}"),
++            ("tvos", "sim") => format!("-mappletvsimulator-version-min={min_version}"),
++            ("tvos", _) => format!("-mappletvos-version-min={min_version}"),
++            ("watchos", "sim") => format!("-mwatchsimulator-version-min={min_version}"),
++            ("watchos", _) => format!("-mwatchos-version-min={min_version}"),
++            // `-mxros-version-min` does not exist
++            // https://github.com/llvm/llvm-project/issues/88271
++            ("visionos", "sim") => format!("-mtargetos=xros{min_version}-simulator"),
++            ("visionos", _) => format!("-mtargetos=xros{min_version}"),
++            (os, _) => panic!("invalid Apple target OS {}", os),
++        }
++    }
++}
+--- /dev/null
++++ cmdstr-0.1.6/vendor/cc/src/target/generated.rs
+@@ -0,0 +1,338 @@
++//! This file is generated code. Please edit the generator in
++//! dev-tools/gen-target-info if you need to make changes, or see
++//! src/target/llvm.rs if you need to configure a specific LLVM triple.
++
++#[rustfmt::skip]
++pub(crate) const LLVM_TARGETS: &[(&str, &str)] = &[
++    ("aarch64-apple-darwin", "arm64-apple-macosx"),
++    ("aarch64-apple-ios", "arm64-apple-ios"),
++    ("aarch64-apple-ios-macabi", "arm64-apple-ios-macabi"),
++    ("aarch64-apple-ios-sim", "arm64-apple-ios-simulator"),
++    ("aarch64-apple-tvos", "arm64-apple-tvos"),
++    ("aarch64-apple-tvos-sim", "arm64-apple-tvos-simulator"),
++    ("aarch64-apple-visionos", "arm64-apple-xros"),
++    ("aarch64-apple-visionos-sim", "arm64-apple-xros-simulator"),
++    ("aarch64-apple-watchos", "arm64-apple-watchos"),
++    ("aarch64-apple-watchos-sim", "arm64-apple-watchos-simulator"),
++    ("aarch64-fuchsia", "aarch64-fuchsia"),
++    ("aarch64-kmc-solid_asp3", "aarch64-unknown-none"),
++    ("aarch64-linux-android", "aarch64-linux-android"),
++    ("aarch64-nintendo-switch-freestanding", "aarch64-unknown-none"),
++    ("aarch64-pc-windows-gnullvm", "aarch64-pc-windows-gnu"),
++    ("aarch64-pc-windows-msvc", "aarch64-pc-windows-msvc"),
++    ("aarch64-unknown-freebsd", "aarch64-unknown-freebsd"),
++    ("aarch64-unknown-fuchsia", "aarch64-unknown-fuchsia"),
++    ("aarch64-unknown-helenos", "aarch64-unknown-helenos"),
++    ("aarch64-unknown-hermit", "aarch64-unknown-hermit"),
++    ("aarch64-unknown-illumos", "aarch64-unknown-solaris2.11"),
++    ("aarch64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"),
++    ("aarch64-unknown-linux-gnu_ilp32", "aarch64-unknown-linux-gnu_ilp32"),
++    ("aarch64-unknown-linux-musl", "aarch64-unknown-linux-musl"),
++    ("aarch64-unknown-linux-ohos", "aarch64-unknown-linux-ohos"),
++    ("aarch64-unknown-managarm-mlibc", "aarch64-unknown-managarm-mlibc"),
++    ("aarch64-unknown-netbsd", "aarch64-unknown-netbsd"),
++    ("aarch64-unknown-none", "aarch64-unknown-none"),
++    ("aarch64-unknown-none-softfloat", "aarch64-unknown-none"),
++    ("aarch64-unknown-nto-qnx700", "aarch64-unknown-unknown"),
++    ("aarch64-unknown-nto-qnx710", "aarch64-unknown-unknown"),
++    ("aarch64-unknown-nto-qnx710_iosock", "aarch64-unknown-unknown"),
++    ("aarch64-unknown-nto-qnx800", "aarch64-unknown-unknown"),
++    ("aarch64-unknown-nuttx", "aarch64-unknown-none"),
++    ("aarch64-unknown-openbsd", "aarch64-unknown-openbsd"),
++    ("aarch64-unknown-redox", "aarch64-unknown-redox"),
++    ("aarch64-unknown-teeos", "aarch64-unknown-none"),
++    ("aarch64-unknown-trusty", "aarch64-unknown-unknown-musl"),
++    ("aarch64-unknown-uefi", "aarch64-unknown-windows"),
++    ("aarch64-uwp-windows-msvc", "aarch64-pc-windows-msvc"),
++    ("aarch64-wrs-vxworks", "aarch64-unknown-linux-gnu"),
++    ("aarch64_be-unknown-hermit", "aarch64_be-unknown-hermit"),
++    ("aarch64_be-unknown-linux-gnu", "aarch64_be-unknown-linux-gnu"),
++    ("aarch64_be-unknown-linux-gnu_ilp32", "aarch64_be-unknown-linux-gnu_ilp32"),
++    ("aarch64_be-unknown-linux-musl", "aarch64_be-unknown-linux-musl"),
++    ("aarch64_be-unknown-netbsd", "aarch64_be-unknown-netbsd"),
++    ("aarch64_be-unknown-none-softfloat", "aarch64_be-unknown-none"),
++    ("aarch64v8r-unknown-none", "aarch64-unknown-none"),
++    ("aarch64v8r-unknown-none-softfloat", "aarch64-unknown-none"),
++    ("amdgcn-amd-amdhsa", "amdgcn-amd-amdhsa"),
++    ("arm-linux-androideabi", "arm-linux-androideabi"),
++    ("arm-unknown-linux-gnueabi", "arm-unknown-linux-gnueabi"),
++    ("arm-unknown-linux-gnueabihf", "arm-unknown-linux-gnueabihf"),
++    ("arm-unknown-linux-musleabi", "arm-unknown-linux-musleabi"),
++    ("arm-unknown-linux-musleabihf", "arm-unknown-linux-musleabihf"),
++    ("arm64_32-apple-watchos", "arm64_32-apple-watchos"),
++    ("arm64e-apple-darwin", "arm64e-apple-macosx"),
++    ("arm64e-apple-ios", "arm64e-apple-ios"),
++    ("arm64e-apple-tvos", "arm64e-apple-tvos"),
++    ("arm64ec-pc-windows-msvc", "arm64ec-pc-windows-msvc"),
++    ("armeb-unknown-linux-gnueabi", "armeb-unknown-linux-gnueabi"),
++    ("armebv7r-none-eabi", "armebv7r-none-eabi"),
++    ("armebv7r-none-eabihf", "armebv7r-none-eabihf"),
++    ("armv4t-none-eabi", "armv4t-none-eabi"),
++    ("armv4t-unknown-linux-gnueabi", "armv4t-unknown-linux-gnueabi"),
++    ("armv5te-none-eabi", "armv5te-none-eabi"),
++    ("armv5te-unknown-linux-gnueabi", "armv5te-unknown-linux-gnueabi"),
++    ("armv5te-unknown-linux-musleabi", "armv5te-unknown-linux-musleabi"),
++    ("armv5te-unknown-linux-uclibceabi", "armv5te-unknown-linux-gnueabi"),
++    ("armv6-none-eabi", "armv6-none-eabi"),
++    ("armv6-none-eabihf", "armv6-none-eabihf"),
++    ("armv6-unknown-freebsd", "armv6-unknown-freebsd-gnueabihf"),
++    ("armv6-unknown-netbsd-eabihf", "armv6-unknown-netbsdelf-eabihf"),
++    ("armv6k-nintendo-3ds", "armv6k-none-eabihf"),
++    ("armv7-apple-ios", "armv7-apple-ios7.0.0"),
++    ("armv7-linux-androideabi", "armv7-none-linux-android"),
++    ("armv7-rtems-eabihf", "armv7-unknown-none-eabihf"),
++    ("armv7-sony-vita-newlibeabihf", "thumbv7a-sony-vita-eabihf"),
++    ("armv7-unknown-freebsd", "armv7-unknown-freebsd-gnueabihf"),
++    ("armv7-unknown-linux-gnueabi", "armv7-unknown-linux-gnueabi"),
++    ("armv7-unknown-linux-gnueabihf", "armv7-unknown-linux-gnueabihf"),
++    ("armv7-unknown-linux-musleabi", "armv7-unknown-linux-musleabi"),
++    ("armv7-unknown-linux-musleabihf", "armv7-unknown-linux-musleabihf"),
++    ("armv7-unknown-linux-ohos", "armv7-unknown-linux-ohos"),
++    ("armv7-unknown-linux-uclibceabi", "armv7-unknown-linux-gnueabi"),
++    ("armv7-unknown-linux-uclibceabihf", "armv7-unknown-linux-gnueabihf"),
++    ("armv7-unknown-netbsd-eabihf", "armv7-unknown-netbsdelf-eabihf"),
++    ("armv7-unknown-trusty", "armv7-unknown-unknown-gnueabi"),
++    ("armv7-wrs-vxworks-eabihf", "armv7-unknown-linux-gnueabihf"),
++    ("armv7a-kmc-solid_asp3-eabi", "armv7a-none-eabi"),
++    ("armv7a-kmc-solid_asp3-eabihf", "armv7a-none-eabihf"),
++    ("armv7a-none-eabi", "armv7a-none-eabi"),
++    ("armv7a-none-eabihf", "armv7a-none-eabihf"),
++    ("armv7a-nuttx-eabi", "armv7a-none-eabi"),
++    ("armv7a-nuttx-eabihf", "armv7a-none-eabihf"),
++    ("armv7a-vex-v5", "armv7a-none-eabihf"),
++    ("armv7k-apple-watchos", "armv7k-apple-watchos"),
++    ("armv7r-none-eabi", "armv7r-none-eabi"),
++    ("armv7r-none-eabihf", "armv7r-none-eabihf"),
++    ("armv7s-apple-ios", "armv7s-apple-ios"),
++    ("armv8r-none-eabihf", "armv8r-none-eabihf"),
++    ("asmjs-unknown-emscripten", "wasm32-unknown-emscripten"),
++    ("avr-none", "avr-unknown-unknown"),
++    ("avr-unknown-gnu-atmega328", "avr-unknown-unknown"),
++    ("bpfeb-unknown-none", "bpfeb"),
++    ("bpfel-unknown-none", "bpfel"),
++    ("csky-unknown-linux-gnuabiv2", "csky-unknown-linux-gnuabiv2"),
++    ("csky-unknown-linux-gnuabiv2hf", "csky-unknown-linux-gnuabiv2"),
++    ("hexagon-unknown-linux-musl", "hexagon-unknown-linux-musl"),
++    ("hexagon-unknown-none-elf", "hexagon-unknown-none-elf"),
++    ("hexagon-unknown-qurt", "hexagon-unknown-elf"),
++    ("i386-apple-ios", "i386-apple-ios-simulator"),
++    ("i586-pc-windows-msvc", "i586-pc-windows-msvc"),
++    ("i586-unknown-linux-gnu", "i586-unknown-linux-gnu"),
++    ("i586-unknown-linux-musl", "i586-unknown-linux-musl"),
++    ("i586-unknown-netbsd", "i586-unknown-netbsdelf"),
++    ("i586-unknown-redox", "i586-unknown-redox"),
++    ("i686-apple-darwin", "i686-apple-macosx"),
++    ("i686-linux-android", "i686-linux-android"),
++    ("i686-pc-nto-qnx700", "i586-pc-unknown"),
++    ("i686-pc-windows-gnu", "i686-pc-windows-gnu"),
++    ("i686-pc-windows-gnullvm", "i686-pc-windows-gnu"),
++    ("i686-pc-windows-msvc", "i686-pc-windows-msvc"),
++    ("i686-unknown-freebsd", "i686-unknown-freebsd"),
++    ("i686-unknown-haiku", "i686-unknown-haiku"),
++    ("i686-unknown-helenos", "i686-unknown-helenos"),
++    ("i686-unknown-hurd-gnu", "i686-unknown-hurd-gnu"),
++    ("i686-unknown-linux-gnu", "i686-unknown-linux-gnu"),
++    ("i686-unknown-linux-musl", "i686-unknown-linux-musl"),
++    ("i686-unknown-netbsd", "i686-unknown-netbsdelf"),
++    ("i686-unknown-openbsd", "i686-unknown-openbsd"),
++    ("i686-unknown-uefi", "i686-unknown-windows-gnu"),
++    ("i686-uwp-windows-gnu", "i686-pc-windows-gnu"),
++    ("i686-uwp-windows-msvc", "i686-pc-windows-msvc"),
++    ("i686-win7-windows-gnu", "i686-pc-windows-gnu"),
++    ("i686-win7-windows-msvc", "i686-pc-windows-msvc"),
++    ("i686-wrs-vxworks", "i686-unknown-linux-gnu"),
++    ("loongarch32-unknown-none", "loongarch32-unknown-none"),
++    ("loongarch32-unknown-none-softfloat", "loongarch32-unknown-none"),
++    ("loongarch64-unknown-linux-gnu", "loongarch64-unknown-linux-gnu"),
++    ("loongarch64-unknown-linux-musl", "loongarch64-unknown-linux-musl"),
++    ("loongarch64-unknown-linux-ohos", "loongarch64-unknown-linux-ohos"),
++    ("loongarch64-unknown-none", "loongarch64-unknown-none"),
++    ("loongarch64-unknown-none-softfloat", "loongarch64-unknown-none"),
++    ("m68k-unknown-linux-gnu", "m68k-unknown-linux-gnu"),
++    ("m68k-unknown-none-elf", "m68k"),
++    ("mips-mti-none-elf", "mips"),
++    ("mips-unknown-linux-gnu", "mips-unknown-linux-gnu"),
++    ("mips-unknown-linux-musl", "mips-unknown-linux-musl"),
++    ("mips-unknown-linux-uclibc", "mips-unknown-linux-gnu"),
++    ("mips64-openwrt-linux-musl", "mips64-unknown-linux-musl"),
++    ("mips64-unknown-linux-gnuabi64", "mips64-unknown-linux-gnuabi64"),
++    ("mips64-unknown-linux-muslabi64", "mips64-unknown-linux-musl"),
++    ("mips64el-unknown-linux-gnuabi64", "mips64el-unknown-linux-gnuabi64"),
++    ("mips64el-unknown-linux-muslabi64", "mips64el-unknown-linux-musl"),
++    ("mipsel-mti-none-elf", "mipsel"),
++    ("mipsel-sony-psp", "mipsel-sony-psp"),
++    ("mipsel-sony-psx", "mipsel-sony-psx"),
++    ("mipsel-unknown-linux-gnu", "mipsel-unknown-linux-gnu"),
++    ("mipsel-unknown-linux-musl", "mipsel-unknown-linux-musl"),
++    ("mipsel-unknown-linux-uclibc", "mipsel-unknown-linux-gnu"),
++    ("mipsel-unknown-netbsd", "mipsel-unknown-netbsd"),
++    ("mipsel-unknown-none", "mipsel-unknown-none"),
++    ("mipsisa32r6-unknown-linux-gnu", "mipsisa32r6-unknown-linux-gnu"),
++    ("mipsisa32r6el-unknown-linux-gnu", "mipsisa32r6el-unknown-linux-gnu"),
++    ("mipsisa64r6-unknown-linux-gnuabi64", "mipsisa64r6-unknown-linux-gnuabi64"),
++    ("mipsisa64r6el-unknown-linux-gnuabi64", "mipsisa64r6el-unknown-linux-gnuabi64"),
++    ("msp430-none-elf", "msp430-none-elf"),
++    ("nvptx64-nvidia-cuda", "nvptx64-nvidia-cuda"),
++    ("powerpc-unknown-freebsd", "powerpc-unknown-freebsd13.0"),
++    ("powerpc-unknown-helenos", "powerpc-unknown-helenos"),
++    ("powerpc-unknown-linux-gnu", "powerpc-unknown-linux-gnu"),
++    ("powerpc-unknown-linux-gnuspe", "powerpc-unknown-linux-gnuspe"),
++    ("powerpc-unknown-linux-musl", "powerpc-unknown-linux-musl"),
++    ("powerpc-unknown-linux-muslspe", "powerpc-unknown-linux-muslspe"),
++    ("powerpc-unknown-netbsd", "powerpc-unknown-netbsd"),
++    ("powerpc-unknown-openbsd", "powerpc-unknown-openbsd"),
++    ("powerpc-wrs-vxworks", "powerpc-unknown-linux-gnu"),
++    ("powerpc-wrs-vxworks-spe", "powerpc-unknown-linux-gnuspe"),
++    ("powerpc64-ibm-aix", "powerpc64-ibm-aix"),
++    ("powerpc64-unknown-freebsd", "powerpc64-unknown-freebsd"),
++    ("powerpc64-unknown-linux-gnu", "powerpc64-unknown-linux-gnu"),
++    ("powerpc64-unknown-linux-musl", "powerpc64-unknown-linux-musl"),
++    ("powerpc64-unknown-openbsd", "powerpc64-unknown-openbsd"),
++    ("powerpc64-wrs-vxworks", "powerpc64-unknown-linux-gnu"),
++    ("powerpc64le-unknown-freebsd", "powerpc64le-unknown-freebsd"),
++    ("powerpc64le-unknown-linux-gnu", "powerpc64le-unknown-linux-gnu"),
++    ("powerpc64le-unknown-linux-musl", "powerpc64le-unknown-linux-musl"),
++    ("riscv32-wrs-vxworks", "riscv32-unknown-linux-gnu"),
++    ("riscv32e-unknown-none-elf", "riscv32"),
++    ("riscv32em-unknown-none-elf", "riscv32"),
++    ("riscv32emc-unknown-none-elf", "riscv32"),
++    ("riscv32gc-unknown-linux-gnu", "riscv32-unknown-linux-gnu"),
++    ("riscv32gc-unknown-linux-musl", "riscv32-unknown-linux-musl"),
++    ("riscv32i-unknown-none-elf", "riscv32"),
++    ("riscv32im-risc0-zkvm-elf", "riscv32"),
++    ("riscv32im-unknown-none-elf", "riscv32"),
++    ("riscv32ima-unknown-none-elf", "riscv32"),
++    ("riscv32imac-esp-espidf", "riscv32"),
++    ("riscv32imac-unknown-none-elf", "riscv32"),
++    ("riscv32imac-unknown-nuttx-elf", "riscv32"),
++    ("riscv32imac-unknown-xous-elf", "riscv32"),
++    ("riscv32imafc-esp-espidf", "riscv32"),
++    ("riscv32imafc-unknown-none-elf", "riscv32"),
++    ("riscv32imafc-unknown-nuttx-elf", "riscv32"),
++    ("riscv32imc-esp-espidf", "riscv32"),
++    ("riscv32imc-unknown-none-elf", "riscv32"),
++    ("riscv32imc-unknown-nuttx-elf", "riscv32"),
++    ("riscv64-linux-android", "riscv64-linux-android"),
++    ("riscv64-wrs-vxworks", "riscv64-unknown-linux-gnu"),
++    ("riscv64a23-unknown-linux-gnu", "riscv64-unknown-linux-gnu"),
++    ("riscv64gc-unknown-freebsd", "riscv64-unknown-freebsd"),
++    ("riscv64gc-unknown-fuchsia", "riscv64-unknown-fuchsia"),
++    ("riscv64gc-unknown-hermit", "riscv64-unknown-hermit"),
++    ("riscv64gc-unknown-linux-gnu", "riscv64-unknown-linux-gnu"),
++    ("riscv64gc-unknown-linux-musl", "riscv64-unknown-linux-musl"),
++    ("riscv64gc-unknown-managarm-mlibc", "riscv64-unknown-managarm-mlibc"),
++    ("riscv64gc-unknown-netbsd", "riscv64-unknown-netbsd"),
++    ("riscv64gc-unknown-none-elf", "riscv64"),
++    ("riscv64gc-unknown-nuttx-elf", "riscv64"),
++    ("riscv64gc-unknown-openbsd", "riscv64-unknown-openbsd"),
++    ("riscv64gc-unknown-redox", "riscv64-unknown-redox"),
++    ("riscv64im-unknown-none-elf", "riscv64"),
++    ("riscv64imac-unknown-none-elf", "riscv64"),
++    ("riscv64imac-unknown-nuttx-elf", "riscv64"),
++    ("s390x-unknown-linux-gnu", "s390x-unknown-linux-gnu"),
++    ("s390x-unknown-linux-musl", "s390x-unknown-linux-musl"),
++    ("s390x-unknown-none-softfloat", "s390x-unknown-linux-gnu"),
++    ("sparc-unknown-linux-gnu", "sparc-unknown-linux-gnu"),
++    ("sparc-unknown-none-elf", "sparc-unknown-none-elf"),
++    ("sparc64-unknown-helenos", "sparc64-unknown-helenos"),
++    ("sparc64-unknown-linux-gnu", "sparc64-unknown-linux-gnu"),
++    ("sparc64-unknown-netbsd", "sparc64-unknown-netbsd"),
++    ("sparc64-unknown-openbsd", "sparc64-unknown-openbsd"),
++    ("sparcv9-sun-solaris", "sparcv9-sun-solaris"),
++    ("thumbv4t-none-eabi", "thumbv4t-none-eabi"),
++    ("thumbv5te-none-eabi", "thumbv5te-none-eabi"),
++    ("thumbv6-none-eabi", "thumbv6-none-eabi"),
++    ("thumbv6m-none-eabi", "thumbv6m-none-eabi"),
++    ("thumbv6m-nuttx-eabi", "thumbv6m-none-eabi"),
++    ("thumbv7a-none-eabi", "thumbv7a-none-eabi"),
++    ("thumbv7a-none-eabihf", "thumbv7a-none-eabihf"),
++    ("thumbv7a-nuttx-eabi", "thumbv7a-none-eabi"),
++    ("thumbv7a-nuttx-eabihf", "thumbv7a-none-eabihf"),
++    ("thumbv7a-pc-windows-msvc", "thumbv7a-pc-windows-msvc"),
++    ("thumbv7a-uwp-windows-msvc", "thumbv7a-pc-windows-msvc"),
++    ("thumbv7em-none-eabi", "thumbv7em-none-eabi"),
++    ("thumbv7em-none-eabihf", "thumbv7em-none-eabihf"),
++    ("thumbv7em-nuttx-eabi", "thumbv7em-none-eabi"),
++    ("thumbv7em-nuttx-eabihf", "thumbv7em-none-eabihf"),
++    ("thumbv7m-none-eabi", "thumbv7m-none-eabi"),
++    ("thumbv7m-nuttx-eabi", "thumbv7m-none-eabi"),
++    ("thumbv7neon-linux-androideabi", "armv7-none-linux-android"),
++    ("thumbv7neon-unknown-linux-gnueabihf", "armv7-unknown-linux-gnueabihf"),
++    ("thumbv7neon-unknown-linux-musleabihf", "armv7-unknown-linux-musleabihf"),
++    ("thumbv7r-none-eabi", "thumbv7r-none-eabi"),
++    ("thumbv7r-none-eabihf", "thumbv7r-none-eabihf"),
++    ("thumbv8m.base-none-eabi", "thumbv8m.base-none-eabi"),
++    ("thumbv8m.base-nuttx-eabi", "thumbv8m.base-none-eabi"),
++    ("thumbv8m.main-none-eabi", "thumbv8m.main-none-eabi"),
++    ("thumbv8m.main-none-eabihf", "thumbv8m.main-none-eabihf"),
++    ("thumbv8m.main-nuttx-eabi", "thumbv8m.main-none-eabi"),
++    ("thumbv8m.main-nuttx-eabihf", "thumbv8m.main-none-eabihf"),
++    ("thumbv8r-none-eabihf", "thumbv8r-none-eabihf"),
++    ("wasm32-unknown-emscripten", "wasm32-unknown-emscripten"),
++    ("wasm32-unknown-unknown", "wasm32-unknown-unknown"),
++    ("wasm32-wali-linux-musl", "wasm32-linux-muslwali"),
++    ("wasm32-wasi", "wasm32-wasi"),
++    ("wasm32-wasip1", "wasm32-wasip1"),
++    ("wasm32-wasip1-threads", "wasm32-wasi"),
++    ("wasm32-wasip2", "wasm32-wasip2"),
++    ("wasm32-wasip3", "wasm32-wasip3"),
++    ("wasm32v1-none", "wasm32-unknown-unknown"),
++    ("wasm64-unknown-unknown", "wasm64-unknown-unknown"),
++    ("x86_64-apple-darwin", "x86_64-apple-macosx"),
++    ("x86_64-apple-ios", "x86_64-apple-ios-simulator"),
++    ("x86_64-apple-ios-macabi", "x86_64-apple-ios-macabi"),
++    ("x86_64-apple-tvos", "x86_64-apple-tvos-simulator"),
++    ("x86_64-apple-watchos-sim", "x86_64-apple-watchos-simulator"),
++    ("x86_64-fortanix-unknown-sgx", "x86_64-elf"),
++    ("x86_64-fuchsia", "x86_64-fuchsia"),
++    ("x86_64-linux-android", "x86_64-linux-android"),
++    ("x86_64-lynx-lynxos178", "x86_64-unknown-unknown-gnu"),
++    ("x86_64-pc-cygwin", "x86_64-pc-cygwin"),
++    ("x86_64-pc-nto-qnx710", "x86_64-pc-unknown"),
++    ("x86_64-pc-nto-qnx710_iosock", "x86_64-pc-unknown"),
++    ("x86_64-pc-nto-qnx800", "x86_64-pc-unknown"),
++    ("x86_64-pc-solaris", "x86_64-pc-solaris"),
++    ("x86_64-pc-windows-gnu", "x86_64-pc-windows-gnu"),
++    ("x86_64-pc-windows-gnullvm", "x86_64-pc-windows-gnu"),
++    ("x86_64-pc-windows-msvc", "x86_64-pc-windows-msvc"),
++    ("x86_64-sun-solaris", "x86_64-pc-solaris"),
++    ("x86_64-unikraft-linux-musl", "x86_64-unknown-linux-musl"),
++    ("x86_64-unknown-dragonfly", "x86_64-unknown-dragonfly"),
++    ("x86_64-unknown-freebsd", "x86_64-unknown-freebsd"),
++    ("x86_64-unknown-fuchsia", "x86_64-unknown-fuchsia"),
++    ("x86_64-unknown-haiku", "x86_64-unknown-haiku"),
++    ("x86_64-unknown-helenos", "x86_64-unknown-helenos"),
++    ("x86_64-unknown-hermit", "x86_64-unknown-hermit"),
++    ("x86_64-unknown-hurd-gnu", "x86_64-unknown-hurd-gnu"),
++    ("x86_64-unknown-illumos", "x86_64-pc-solaris"),
++    ("x86_64-unknown-l4re-uclibc", "x86_64-unknown-l4re-gnu"),
++    ("x86_64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"),
++    ("x86_64-unknown-linux-gnuasan", "x86_64-unknown-linux-gnu"),
++    ("x86_64-unknown-linux-gnumsan", "x86_64-unknown-linux-gnu"),
++    ("x86_64-unknown-linux-gnutsan", "x86_64-unknown-linux-gnu"),
++    ("x86_64-unknown-linux-gnux32", "x86_64-unknown-linux-gnux32"),
++    ("x86_64-unknown-linux-musl", "x86_64-unknown-linux-musl"),
++    ("x86_64-unknown-linux-none", "x86_64-unknown-linux-none"),
++    ("x86_64-unknown-linux-ohos", "x86_64-unknown-linux-ohos"),
++    ("x86_64-unknown-managarm-mlibc", "x86_64-unknown-managarm-mlibc"),
++    ("x86_64-unknown-motor", "x86_64-unknown-none-elf"),
++    ("x86_64-unknown-netbsd", "x86_64-unknown-netbsd"),
++    ("x86_64-unknown-none", "x86_64-unknown-none-elf"),
++    ("x86_64-unknown-none-linuxkernel", "x86_64-unknown-none-elf"),
++    ("x86_64-unknown-openbsd", "x86_64-unknown-openbsd"),
++    ("x86_64-unknown-redox", "x86_64-unknown-redox"),
++    ("x86_64-unknown-trusty", "x86_64-unknown-unknown-musl"),
++    ("x86_64-unknown-uefi", "x86_64-unknown-windows"),
++    ("x86_64-uwp-windows-gnu", "x86_64-pc-windows-gnu"),
++    ("x86_64-uwp-windows-msvc", "x86_64-pc-windows-msvc"),
++    ("x86_64-win7-windows-gnu", "x86_64-pc-windows-gnu"),
++    ("x86_64-win7-windows-msvc", "x86_64-pc-windows-msvc"),
++    ("x86_64-wrs-vxworks", "x86_64-unknown-linux-gnu"),
++    ("x86_64h-apple-darwin", "x86_64h-apple-macosx"),
++    ("xtensa-esp32-espidf", "xtensa-none-elf"),
++    ("xtensa-esp32-none-elf", "xtensa-none-elf"),
++    ("xtensa-esp32s2-espidf", "xtensa-none-elf"),
++    ("xtensa-esp32s2-none-elf", "xtensa-none-elf"),
++    ("xtensa-esp32s3-espidf", "xtensa-none-elf"),
++    ("xtensa-esp32s3-none-elf", "xtensa-none-elf"),
++];
+--- /dev/null
++++ cmdstr-0.1.6/vendor/cc/src/target/llvm.rs
+@@ -0,0 +1,316 @@
++use std::borrow::Cow;
++
++use super::{generated, TargetInfo};
++
++impl TargetInfo<'_> {
++    /// The LLVM/Clang target triple.
++    ///
++    /// See <https://clang.llvm.org/docs/CrossCompilation.html#target-triple>.
++    ///
++    /// Rust and Clang don't really agree on target naming, so we first try to
++    /// find the matching trible based on `rustc`'s output, but if no such
++    /// triple exists, we attempt to construct the triple from scratch.
++    ///
++    /// NOTE: You should never need to match on this explicitly, use the
++    /// fields on [`TargetInfo`] instead.
++    pub(crate) fn llvm_target(
++        &self,
++        rustc_target: &str,
++        version: Option<&str>,
++    ) -> Cow<'static, str> {
++        if rustc_target == "armv7-apple-ios" {
++            // FIXME(madsmtm): Unnecessary once we bump MSRV to Rust 1.74
++            return Cow::Borrowed("armv7-apple-ios");
++        } else if self.os == "uefi" {
++            // Override the UEFI LLVM targets.
++            //
++            // The rustc mappings (as of 1.82) for the UEFI targets are:
++            // * i686-unknown-uefi -> i686-unknown-windows-gnu
++            // * x86_64-unknown-uefi -> x86_64-unknown-windows
++            // * aarch64-unknown-uefi -> aarch64-unknown-windows
++            //
++            // However, in cc-rs all the UEFI targets use
++            // -windows-gnu. This has been the case since 2021 [1].
++            // * i686-unknown-uefi -> i686-unknown-windows-gnu
++            // * x86_64-unknown-uefi -> x86_64-unknown-windows-gnu
++            // * aarch64-unknown-uefi -> aarch64-unknown-windows-gnu
++            //
++            // For now, override the UEFI mapping to keep the behavior
++            // of cc-rs unchanged.
++            //
++            // TODO: as discussed in [2], it may be possible to switch
++            // to new UEFI targets added to clang, and regardless it
++            // would be good to have consistency between rustc and
++            // cc-rs.
++            //
++            // [1]: https://github.com/rust-lang/cc-rs/pull/623
++            // [2]: https://github.com/rust-lang/cc-rs/pull/1264
++            return Cow::Owned(format!("{}-unknown-windows-gnu", self.full_arch));
++        }
++
++        // If no version is requested, let's take the triple directly from
++        // `rustc` (the logic below is not yet good enough for most targets).
++        //
++        // FIXME(madsmtm): This should ideally be removed.
++        if version.is_none() {
++            if let Ok(index) = generated::LLVM_TARGETS
++                .binary_search_by_key(&rustc_target, |(rustc_target, _)| rustc_target)
++            {
++                let (_, llvm_target) = &generated::LLVM_TARGETS[index];
++                return Cow::Borrowed(llvm_target);
++            }
++        }
++
++        // Otherwise, attempt to construct the triple from the target info.
++
++        let arch = match self.full_arch {
++            riscv32 if riscv32.starts_with("riscv32") => "riscv32",
++            riscv64 if riscv64.starts_with("riscv64") => "riscv64",
++            "aarch64" if self.vendor == "apple" => "arm64",
++            "armv7" if self.vendor == "sony" => "thumbv7a", // FIXME
++            arch => arch,
++        };
++        let vendor = match self.vendor {
++            "kmc" | "nintendo" => "unknown",
++            "unknown" if self.os == "android" => "linux",
++            "uwp" => "pc",
++            "espressif" => "",
++            _ if self.arch == "msp430" => "",
++            vendor => vendor,
++        };
++        let os = match self.os {
++            "macos" => "macosx",
++            "visionos" => "xros",
++            "uefi" => "windows",
++            "solid_asp3" | "horizon" | "teeos" | "nuttx" | "espidf" => "none",
++            "nto" => "unknown",    // FIXME
++            "trusty" => "unknown", // FIXME
++            os => os,
++        };
++        let version = version.unwrap_or("");
++        let env = match self.env {
++            "newlib" | "nto70" | "nto71" | "nto71_iosock" | "p1" | "p2" | "relibc" | "sgx"
++            | "uclibc" => "",
++            "sim" => "simulator",
++            env => env,
++        };
++        let abi = match self.abi {
++            "llvm" | "softfloat" | "uwp" | "vec-extabi" => "",
++            "ilp32" => "_ilp32",
++            "abi64" => "",
++            "elfv1" | "elfv2" => "",
++            abi => abi,
++        };
++        Cow::Owned(match (vendor, env, abi) {
++            ("", "", "") => format!("{arch}-{os}{version}"),
++            ("", env, abi) => format!("{arch}-{os}{version}-{env}{abi}"),
++            (vendor, "", "") => format!("{arch}-{vendor}-{os}{version}"),
++            (vendor, env, abi) => format!("{arch}-{vendor}-{os}{version}-{env}{abi}"),
++        })
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use std::process::Command;
++
++    use crate::TargetInfo;
++
++    #[test]
++    fn test_old_ios_target() {
++        assert_eq!(
++            TargetInfo {
++                full_arch: "armv7",
++                arch: "armv7",
++                vendor: "apple",
++                os: "ios",
++                env: "",
++                abi: "",
++            }
++            .llvm_target("armv7-apple-ios", None),
++            "armv7-apple-ios"
++        );
++    }
++
++    #[test]
++    fn basic_llvm_triple_guessing() {
++        assert_eq!(
++            TargetInfo {
++                full_arch: "aarch64",
++                arch: "aarch64",
++                vendor: "unknown",
++                os: "linux",
++                env: "",
++                abi: "",
++            }
++            .llvm_target("invalid", None),
++            "aarch64-unknown-linux"
++        );
++        assert_eq!(
++            TargetInfo {
++                full_arch: "x86_64",
++                arch: "x86_64",
++                vendor: "unknown",
++                os: "linux",
++                env: "gnu",
++                abi: "",
++            }
++            .llvm_target("invalid", None),
++            "x86_64-unknown-linux-gnu"
++        );
++        assert_eq!(
++            TargetInfo {
++                full_arch: "x86_64",
++                arch: "x86_64",
++                vendor: "unknown",
++                os: "linux",
++                env: "gnu",
++                abi: "eabi",
++            }
++            .llvm_target("invalid", None),
++            "x86_64-unknown-linux-gnueabi"
++        );
++        assert_eq!(
++            TargetInfo {
++                full_arch: "x86_64",
++                arch: "x86_64",
++                vendor: "apple",
++                os: "macos",
++                env: "",
++                abi: "",
++            }
++            .llvm_target("invalid", None),
++            "x86_64-apple-macosx"
++        );
++    }
++
++    #[test]
++    fn llvm_version() {
++        assert_eq!(
++            TargetInfo {
++                full_arch: "aarch64",
++                arch: "aarch64",
++                vendor: "apple",
++                os: "ios",
++                env: "sim",
++                abi: "",
++            }
++            .llvm_target("aarch64-apple-ios-sim", Some("14.0")),
++            "arm64-apple-ios14.0-simulator"
++        );
++        assert_eq!(
++            TargetInfo {
++                full_arch: "aarch64",
++                arch: "aarch64",
++                vendor: "apple",
++                os: "visionos",
++                env: "",
++                abi: "",
++            }
++            .llvm_target("aarch64-apple-visionos", Some("2.0")),
++            "arm64-apple-xros2.0"
++        );
++        assert_eq!(
++            TargetInfo {
++                full_arch: "aarch64",
++                arch: "aarch64",
++                vendor: "apple",
++                os: "ios",
++                env: "",
++                abi: "macabi",
++            }
++            .llvm_target("aarch64-apple-ios-macabi", Some("13.1")),
++            "arm64-apple-ios13.1-macabi"
++        );
++    }
++
++    #[test]
++    fn uefi() {
++        assert_eq!(
++            TargetInfo {
++                full_arch: "i686",
++                arch: "x86",
++                vendor: "unknown",
++                os: "uefi",
++                env: "",
++                abi: "",
++            }
++            .llvm_target("i686-unknown-uefi", None),
++            "i686-unknown-windows-gnu"
++        );
++        assert_eq!(
++            TargetInfo {
++                full_arch: "x86_64",
++                arch: "x86_64",
++                vendor: "unknown",
++                os: "uefi",
++                env: "",
++                abi: "",
++            }
++            .llvm_target("x86_64-unknown-uefi", None),
++            "x86_64-unknown-windows-gnu"
++        );
++        assert_eq!(
++            TargetInfo {
++                full_arch: "aarch64",
++                arch: "aarch64",
++                vendor: "unknown",
++                os: "uefi",
++                env: "",
++                abi: "",
++            }
++            .llvm_target("aarch64-unknown-uefi", None),
++            "aarch64-unknown-windows-gnu"
++        );
++    }
++
++    #[test]
++    #[ignore = "not yet done"]
++    fn llvm_for_all_rustc_targets() {
++        let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".to_string());
++
++        let target_list = Command::new(&rustc)
++            .arg("--print=target-list")
++            .output()
++            .unwrap()
++            .stdout;
++        let target_list = String::from_utf8(target_list).unwrap();
++
++        let mut has_failure = false;
++        for target in target_list.lines() {
++            let spec_json = Command::new(&rustc)
++                .arg("--target")
++                .arg(target)
++                .arg("-Zunstable-options")
++                .arg("--print=target-spec-json")
++                .env("RUSTC_BOOTSTRAP", "1") // Crimes
++                .output()
++                .unwrap()
++                .stdout;
++            let spec_json = String::from_utf8(spec_json).unwrap();
++
++            // JSON crimes
++            let expected = spec_json
++                .split_once("llvm-target\": \"")
++                .unwrap()
++                .1
++                .split_once("\"")
++                .unwrap()
++                .0;
++            let actual = TargetInfo::from_rustc_target(target)
++                .map(|target| target.llvm_target("invalid", None));
++
++            if Some(expected) != actual.as_deref().ok() {
++                eprintln!("failed comparing {target}:");
++                eprintln!("  expected: Ok({expected:?})");
++                eprintln!("    actual: {actual:?}");
++                eprintln!();
++                has_failure = true;
++            }
++        }
++
++        if has_failure {
++            panic!("failed comparing targets");
++        }
++    }
++}
+--- /dev/null
++++ cmdstr-0.1.6/vendor/cc/src/target/parser.rs
+@@ -0,0 +1,637 @@
++use std::mem;
++
++use crate::{
++    target::TargetInfo,
++    utilities::{cargo_env_var, OnceLock},
++    Error, ErrorKind,
++};
++
++#[derive(Debug)]
++struct TargetInfoParserInner {
++    full_arch: Box<str>,
++    arch: Box<str>,
++    vendor: Box<str>,
++    os: Box<str>,
++    env: Box<str>,
++    abi: Box<str>,
++}
++
++impl TargetInfoParserInner {
++    fn from_cargo_environment_variables() -> Result<Self, Error> {
++        // `TARGET` must be present.
++        let target_name = cargo_env_var("TARGET")?;
++
++        // Parse the full architecture name from the target name.
++        let (full_arch, _rest) = target_name.split_once('-').ok_or(Error::new(
++            ErrorKind::InvalidTarget,
++            format!("target `{target_name}` only had a single component (at least two required)"),
++        ))?;
++
++        let cargo_env = |key, fallback: Option<&str>| match cargo_env_var(key) {
++            Ok(var) => Ok(var.into_boxed_str()),
++            Err(err) => match fallback {
++                Some(fallback) => Ok(fallback.into()),
++                None => Err(Error::new(
++                    ErrorKind::EnvVarNotFound,
++                    format!(
++                        "did not find fallback information for target `{target_name}`: {}",
++                        err.message
++                    ),
++                )),
++            },
++        };
++
++        // Prefer to use `CARGO_ENV_*` if set, since these contain the most
++        // correct information relative to the current `rustc`, and makes it
++        // possible to support custom target JSON specs unknown to `rustc`.
++        //
++        // NOTE: If the user is using an older `rustc`, that data may be older
++        // than our pre-generated data, but we still prefer Cargo's view of
++        // the world, since at least `cc` won't differ from `rustc` in that
++        // case.
++        //
++        // These may not be set in case the user depended on being able to
++        // just set `TARGET` outside of build scripts; in those cases, fall
++        // back back to data from the known set of target names instead.
++        //
++        // See discussion in #1225 for further details.
++        let fallback_target = TargetInfo::from_rustc_target(&target_name).ok();
++        let ft = fallback_target.as_ref();
++        let arch = cargo_env("CARGO_CFG_TARGET_ARCH", ft.map(|t| t.arch))?;
++        let vendor = cargo_env("CARGO_CFG_TARGET_VENDOR", ft.map(|t| t.vendor))?;
++        let os = cargo_env("CARGO_CFG_TARGET_OS", ft.map(|t| t.os))?;
++        let mut env = cargo_env("CARGO_CFG_TARGET_ENV", ft.map(|t| t.env))?;
++        // `target_abi` was stabilized in Rust 1.78, which is higher than our
++        // MSRV, so it may not always be available; In that case, fall back to
++        // `""`, which is _probably_ correct for unknown target names.
++        let mut abi = cargo_env("CARGO_CFG_TARGET_ABI", ft.map(|t| t.abi))
++            .unwrap_or_else(|_| String::default().into_boxed_str());
++
++        // Remove `macabi` and `sim` from `target_abi` (if present), it's been moved to `target_env`.
++        // TODO: Remove once MSRV is bumped to 1.91 and `rustc` removes these from `target_abi`.
++        if matches!(&*abi, "macabi" | "sim") {
++            debug_assert!(
++                matches!(&*env, "" | "macabi" | "sim"),
++                "env/abi mismatch: {:?}, {:?}",
++                env,
++                abi,
++            );
++            env = mem::replace(&mut abi, String::default().into_boxed_str());
++        }
++
++        Ok(Self {
++            full_arch: full_arch.to_string().into_boxed_str(),
++            arch,
++            vendor,
++            os,
++            env,
++            abi,
++        })
++    }
++}
++
++/// Parser for [`TargetInfo`], contains cached information.
++#[derive(Default, Debug)]
++pub(crate) struct TargetInfoParser(OnceLock<Result<TargetInfoParserInner, Error>>);
++
++impl TargetInfoParser {
++    pub fn parse_from_cargo_environment_variables(&self) -> Result<TargetInfo<'_>, Error> {
++        match self
++            .0
++            .get_or_init(TargetInfoParserInner::from_cargo_environment_variables)
++        {
++            Ok(TargetInfoParserInner {
++                full_arch,
++                arch,
++                vendor,
++                os,
++                env,
++                abi,
++            }) => Ok(TargetInfo {
++                full_arch,
++                arch,
++                vendor,
++                os,
++                env,
++                abi,
++            }),
++            Err(e) => Err(e.clone()),
++        }
++    }
++}
++
++/// Parse the full architecture in the target name into the simpler
++/// `cfg(target_arch = "...")` that `rustc` exposes.
++fn parse_arch(full_arch: &str) -> Option<&str> {
++    // NOTE: Some of these don't necessarily match an existing target in
++    // `rustc`. They're parsed anyhow to be as forward-compatible as possible,
++    // while still being correct.
++    //
++    // See also:
++    // https://docs.rs/cfg-expr/0.18.0/cfg_expr/targets/index.html
++    // https://docs.rs/target-lexicon/0.13.2/target_lexicon/enum.Architecture.html
++    // https://gcc.gnu.org/onlinedocs/gcc/Submodel-Options.html
++    // `clang -print-targets`
++    Some(match full_arch {
++        arch if arch.starts_with("mipsisa32r6") => "mips32r6", // mipsisa32r6 | mipsisa32r6el
++        arch if arch.starts_with("mipsisa64r6") => "mips64r6", // mipsisa64r6 | mipsisa64r6el
++
++        arch if arch.starts_with("mips64") => "mips64", // mips64 | mips64el
++        arch if arch.starts_with("mips") => "mips",     // mips | mipsel
++
++        arch if arch.starts_with("loongarch64") => "loongarch64",
++        arch if arch.starts_with("loongarch32") => "loongarch32",
++
++        arch if arch.starts_with("powerpc64") => "powerpc64", // powerpc64 | powerpc64le
++        arch if arch.starts_with("powerpc") => "powerpc",
++        arch if arch.starts_with("ppc64") => "powerpc64",
++        arch if arch.starts_with("ppc") => "powerpc",
++
++        arch if arch.starts_with("x86_64") => "x86_64", // x86_64 | x86_64h
++        arch if arch.starts_with("i") && arch.ends_with("86") => "x86", // i386 | i586 | i686
++
++        "arm64ec" => "arm64ec", // https://github.com/rust-lang/rust/issues/131172
++        arch if arch.starts_with("aarch64") => "aarch64", // arm64e | arm64_32
++        arch if arch.starts_with("arm64") => "aarch64", // aarch64 | aarch64_be
++
++        arch if arch.starts_with("arm") => "arm", // arm | armv7s | armeb | ...
++        arch if arch.starts_with("thumb") => "arm", // thumbv4t | thumbv7a | thumbv8m | ...
++
++        arch if arch.starts_with("riscv64") => "riscv64",
++        arch if arch.starts_with("riscv32") => "riscv32",
++
++        arch if arch.starts_with("wasm64") => "wasm64",
++        arch if arch.starts_with("wasm32") => "wasm32", // wasm32 | wasm32v1
++        "asmjs" => "wasm32",
++
++        arch if arch.starts_with("nvptx64") => "nvptx64",
++        arch if arch.starts_with("nvptx") => "nvptx",
++
++        arch if arch.starts_with("bpf") => "bpf", // bpfeb | bpfel
++        arch if arch.starts_with("sh4") => "sh4", // sh4 | sh4-unknown-linux-gnu | sh4-unknown-redox
++
++        // https://github.com/bytecodealliance/wasmtime/tree/v30.0.1/pulley
++        arch if arch.starts_with("pulley64") => "pulley64",
++        arch if arch.starts_with("pulley32") => "pulley32",
++
++        // https://github.com/Clever-ISA/Clever-ISA
++        arch if arch.starts_with("clever") => "clever",
++
++        "sparc" | "sparcv7" | "sparcv8" => "sparc",
++        "sparc64" | "sparcv9" => "sparc64",
++
++        "amdgcn" => "amdgpu",
++        "avr" => "avr",
++        "csky" => "csky",
++        "hexagon" => "hexagon",
++        "m68k" => "m68k",
++        "msp430" => "msp430",
++        "r600" => "r600",
++        "s390x" => "s390x",
++        "xtensa" => "xtensa",
++
++        // Arches supported by gcc, but not LLVM.
++        arch if arch.starts_with("alpha") => "alpha", // DEC Alpha
++        "hppa" => "hppa", // https://en.wikipedia.org/wiki/PA-RISC, also known as HPPA
++        arch if arch.starts_with("sh") => "sh", // SuperH
++        _ => return None,
++    })
++}
++
++/// Parse environment and ABI from the last component of the target name.
++fn parse_envabi(last_component: &str) -> Option<(&str, &str)> {
++    let (env, abi) = match last_component {
++        // Combined environment and ABI
++
++        // gnullvm | gnueabi | gnueabihf | gnuabiv2 | gnuabi64 | gnuspe | gnux32 | gnu_ilp32
++        env_and_abi if env_and_abi.starts_with("gnu") => {
++            let abi = env_and_abi.strip_prefix("gnu").unwrap();
++            let abi = abi.strip_prefix("_").unwrap_or(abi);
++            ("gnu", abi)
++        }
++        // musl | musleabi | musleabihf | muslabi64 | muslspe
++        env_and_abi if env_and_abi.starts_with("musl") => {
++            ("musl", env_and_abi.strip_prefix("musl").unwrap())
++        }
++        // uclibc | uclibceabi | uclibceabihf
++        env_and_abi if env_and_abi.starts_with("uclibc") => {
++            ("uclibc", env_and_abi.strip_prefix("uclibc").unwrap())
++        }
++        // newlib | newlibeabihf
++        env_and_abi if env_and_abi.starts_with("newlib") => {
++            ("newlib", env_and_abi.strip_prefix("newlib").unwrap())
++        }
++
++        // Environments
++        "msvc" => ("msvc", ""),
++        "ohos" => ("ohos", ""),
++        "qnx700" => ("nto70", ""),
++        "qnx710_iosock" => ("nto71_iosock", ""),
++        "qnx710" => ("nto71", ""),
++        "qnx800" => ("nto80", ""),
++        "sgx" => ("sgx", ""),
++        "threads" => ("threads", ""),
++        "mlibc" => ("mlibc", ""),
++        "relibc" => ("relibc", ""),
++
++        // ABIs
++        "abi64" => ("", "abi64"),
++        "abiv2" => ("", "spe"),
++        "eabi" => ("", "eabi"),
++        "eabihf" => ("", "eabihf"),
++        "macabi" => ("macabi", ""),
++        "sim" => ("sim", ""),
++        "softfloat" => ("", "softfloat"),
++        "spe" => ("", "spe"),
++        "x32" => ("", "x32"),
++
++        // Badly named targets, ELF is already known from target OS.
++        // Probably too late to fix now though.
++        "elf" => ("", ""),
++        // Undesirable to expose to user code (yet):
++        // https://github.com/rust-lang/rust/pull/131166#issuecomment-2389541917
++        "freestanding" => ("", ""),
++
++        _ => return None,
++    };
++    Some((env, abi))
++}
++
++impl<'a> TargetInfo<'a> {
++    pub(crate) fn from_rustc_target(target: &'a str) -> Result<Self, Error> {
++        // FIXME(madsmtm): This target should be renamed, cannot be parsed
++        // with the means we do below (since `none` must not be interpreted
++        // as an env/ABI).
++        if target == "x86_64-unknown-linux-none" {
++            return Ok(Self {
++                full_arch: "x86_64",
++                arch: "x86_64",
++                vendor: "unknown",
++                os: "linux",
++                env: "",
++                abi: "",
++            });
++        }
++
++        if target == "armv7a-vex-v5" {
++            return Ok(Self {
++                full_arch: "armv7a",
++                arch: "arm",
++                vendor: "vex",
++                os: "vexos",
++                env: "v5",
++                abi: "eabihf",
++            });
++        }
++
++        let mut components = target.split('-');
++
++        // Insist that the target name contains at least a valid architecture.
++        let full_arch = components.next().ok_or(Error::new(
++            ErrorKind::InvalidTarget,
++            "target was empty".to_string(),
++        ))?;
++        let arch = parse_arch(full_arch).ok_or_else(|| {
++            Error::new(
++                ErrorKind::UnknownTarget,
++                format!("target `{target}` had an unknown architecture"),
++            )
++        })?;
++
++        // Newer target names have begun omitting the vendor, so the only
++        // component we know must be there is the OS name.
++        let components: Vec<_> = components.collect();
++        let (vendor, os, mut env, mut abi) = match &*components {
++            [] => {
++                return Err(Error::new(
++                    ErrorKind::InvalidTarget,
++                    format!("target `{target}` must have at least two components"),
++                ))
++            }
++            // Two components; format is `arch-os`.
++            [os] => ("unknown", *os, "", ""),
++            // The three-component case is a bit tricky to handle, it could
++            // either have the format `arch-vendor-os` or `arch-os-env+abi`.
++            [vendor_or_os, os_or_envabi] => {
++                // We differentiate between these by checking if the last
++                // component is an env/ABI; if it isn't, then it's probably
++                // an OS instead.
++                if let Some((env, abi)) = parse_envabi(os_or_envabi) {
++                    ("unknown", *vendor_or_os, env, abi)
++                } else {
++                    (*vendor_or_os, *os_or_envabi, "", "")
++                }
++            }
++            // Four components; format is `arch-vendor-os-env+abi`.
++            [vendor, os, envabi] => {
++                let (env, abi) = parse_envabi(envabi).ok_or_else(|| {
++                    Error::new(
++                        ErrorKind::UnknownTarget,
++                        format!("unknown environment/ABI `{envabi}` in target `{target}`"),
++                    )
++                })?;
++                (*vendor, *os, env, abi)
++            }
++            _ => {
++                return Err(Error::new(
++                    ErrorKind::InvalidTarget,
++                    format!("too many components in target `{target}`"),
++                ))
++            }
++        };
++
++        // Part of the architecture name is carried over into the ABI.
++        match full_arch {
++            // https://github.com/rust-lang/compiler-team/issues/830
++            arch if arch.starts_with("riscv32e") => {
++                abi = "ilp32e";
++            }
++            _ => {}
++        }
++
++        // Various environment/ABIs are determined based on OS name.
++        match os {
++            "3ds" | "rtems" | "espidf" => env = "newlib",
++            "vxworks" => env = "gnu",
++            "redox" => env = "relibc",
++            "aix" => abi = "vec-extabi",
++            _ => {}
++        }
++
++        // Extra overrides for badly named targets.
++        match target {
++            // Actually simulator targets.
++            "i386-apple-ios" | "x86_64-apple-ios" | "x86_64-apple-tvos" => {
++                env = "sim";
++            }
++            // Name should've contained `muslabi64`.
++            "mips64-openwrt-linux-musl" => {
++                abi = "abi64";
++            }
++            // Specifies abi even though not in name.
++            "armv6-unknown-freebsd" | "armv6k-nintendo-3ds" | "armv7-unknown-freebsd" => {
++                abi = "eabihf";
++            }
++            // Specifies abi even though not in name.
++            "armv7-unknown-linux-ohos" | "armv7-unknown-trusty" => {
++                abi = "eabi";
++            }
++            _ => {}
++        }
++
++        let os = match os {
++            // Horizon is the common/internal OS name for 3DS and the Switch.
++            "3ds" | "switch" => "horizon",
++            // FIXME(madsmtm): macOS targets are badly named.
++            "darwin" => "macos",
++
++            // WASI targets contain the preview version in them too. Should've
++            // been `wasi-p1`/`wasi-p2`, but that's probably too late now.
++            os if os.starts_with("wasi") => {
++                env = os.strip_prefix("wasi").unwrap();
++                "wasi"
++            }
++            // FIXME(madsmtm): Badly named targets `*-linux-androideabi`,
++            // should be `*-android-eabi`.
++            "androideabi" => {
++                abi = "eabi";
++                "android"
++            }
++
++            os => os,
++        };
++
++        let vendor = match vendor {
++            // esp, esp32, esp32s2 etc.
++            vendor if vendor.starts_with("esp") => "espressif",
++            // FIXME(madsmtm): Badly named targets `*-linux-android*`,
++            // "linux" makes no sense as the vendor name.
++            "linux" if os == "android" || os == "androideabi" => "unknown",
++            // FIXME(madsmtm): Fix in `rustc` after
++            // https://github.com/rust-lang/compiler-team/issues/850.
++            "wali" => "unknown",
++            "lynx" => "unknown",
++            // Some Linux distributions set their name as the target vendor,
++            // so we have to assume that it can be an arbitary string.
++            vendor => vendor,
++        };
++
++        // Intentionally also marked as an ABI:
++        // https://github.com/rust-lang/rust/pull/86922
++        if vendor == "fortanix" {
++            abi = "fortanix";
++        }
++        if vendor == "uwp" {
++            abi = "uwp";
++        }
++        if ["powerpc64-unknown-linux-gnu", "powerpc64-wrs-vxworks"].contains(&target) {
++            abi = "elfv1";
++        }
++        if [
++            "powerpc64-unknown-freebsd",
++            "powerpc64-unknown-linux-musl",
++            "powerpc64-unknown-openbsd",
++            "powerpc64le-unknown-freebsd",
++            "powerpc64le-unknown-linux-gnu",
++            "powerpc64le-unknown-linux-musl",
++        ]
++        .contains(&target)
++        {
++            abi = "elfv2";
++        }
++
++        if ["asan", "msan", "tsan"].contains(&abi) {
++            abi = "";
++        }
++
++        Ok(Self {
++            full_arch,
++            arch,
++            vendor,
++            os,
++            env,
++            abi,
++        })
++    }
++}
++
++#[cfg(test)]
++#[allow(unexpected_cfgs)]
++mod tests {
++    use std::process::Command;
++
++    use super::TargetInfo;
++    use crate::ErrorKind;
++
++    // Test tier 1 targets.
++    #[test]
++    fn tier1() {
++        let targets = [
++            "aarch64-unknown-linux-gnu",
++            "aarch64-apple-darwin",
++            "i686-pc-windows-gnu",
++            "i686-pc-windows-msvc",
++            "i686-unknown-linux-gnu",
++            "x86_64-apple-darwin",
++            "x86_64-pc-windows-gnu",
++            "x86_64-pc-windows-msvc",
++            "x86_64-unknown-linux-gnu",
++        ];
++
++        for target in targets {
++            // Check that they parse.
++            let _ = TargetInfo::from_rustc_target(target).unwrap();
++        }
++    }
++
++    // Various custom target names not (or no longer) known by `rustc`.
++    #[test]
++    fn parse_extra() {
++        let targets = [
++            "aarch64-unknown-none-gnu",
++            "aarch64-uwp-windows-gnu",
++            "arm-frc-linux-gnueabi",
++            "arm-unknown-netbsd-eabi",
++            "armv7neon-unknown-linux-gnueabihf",
++            "armv7neon-unknown-linux-musleabihf",
++            "thumbv7-unknown-linux-gnueabihf",
++            "thumbv7-unknown-linux-musleabihf",
++            "armv7-apple-ios",
++            "wasm32-wasi",
++            "x86_64-rumprun-netbsd",
++            "x86_64-unknown-linux",
++            "x86_64-alpine-linux-musl",
++            "x86_64-chimera-linux-musl",
++            "x86_64-foxkit-linux-musl",
++            "arm-poky-linux-gnueabi",
++            "x86_64-unknown-moturus",
++            "x86_64-unknown-managarm-mlibc",
++        ];
++
++        for target in targets {
++            // Check that they parse.
++            let _ = TargetInfo::from_rustc_target(target).unwrap();
++        }
++    }
++
++    fn target_from_rustc_cfgs<'a>(target: &'a str, cfgs: &'a str) -> TargetInfo<'a> {
++        // Cannot determine full architecture from cfgs.
++        let (full_arch, _rest) = target.split_once('-').expect("target to have arch");
++
++        let mut target = TargetInfo {
++            full_arch,
++            arch: "invalid-none-set",
++            vendor: "invalid-none-set",
++            os: "invalid-none-set",
++            env: "invalid-none-set",
++            // Not set in older Rust versions
++            abi: "",
++        };
++
++        for cfg in cfgs.lines() {
++            if let Some((name, value)) = cfg.split_once('=') {
++                // Remove whitespace, if `rustc` decided to insert any.
++                let name = name.trim();
++                let value = value.trim();
++
++                // Remove quotes around value.
++                let value = value.strip_prefix('"').unwrap_or(value);
++                let value = value.strip_suffix('"').unwrap_or(value);
++
++                match name {
++                    "target_arch" => target.arch = value,
++                    "target_vendor" => target.vendor = value,
++                    "target_os" => target.os = value,
++                    "target_env" => target.env = value,
++                    "target_abi" => target.abi = value,
++                    _ => {}
++                }
++            } else {
++                // Skip cfgs like `debug_assertions` and `unix`.
++            }
++        }
++
++        if matches!(target.abi, "macabi" | "sim") {
++            assert_eq!(target.env, target.abi);
++            target.abi = "";
++        }
++
++        target
++    }
++
++    #[test]
++    fn unknown_env_determined_as_unknown() {
++        let err = TargetInfo::from_rustc_target("aarch64-unknown-linux-bogus").unwrap_err();
++        assert!(matches!(err.kind, ErrorKind::UnknownTarget));
++    }
++
++    // Used in .github/workflows/test-rustc-targets.yml
++    #[test]
++    #[cfg_attr(
++        not(rustc_target_test),
++        ignore = "must enable explicitly with --cfg=rustc_target_test"
++    )]
++    fn parse_rustc_targets() {
++        let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".to_string());
++
++        let target_list = Command::new(&rustc)
++            .arg("--print=target-list")
++            .output()
++            .unwrap()
++            .stdout;
++        let target_list = String::from_utf8(target_list).unwrap();
++
++        let mut has_failure = false;
++        for target in target_list.lines() {
++            let cfgs = Command::new(&rustc)
++                .arg("--target")
++                .arg(target)
++                .arg("--print=cfg")
++                .output()
++                .unwrap()
++                .stdout;
++            let cfgs = String::from_utf8(cfgs).unwrap();
++
++            let expected = target_from_rustc_cfgs(target, &cfgs);
++            let actual = TargetInfo::from_rustc_target(target);
++
++            if Some(&expected) != actual.as_ref().ok() {
++                eprintln!("failed comparing {target}:");
++                eprintln!("  expected: Ok({expected:?})");
++                eprintln!("    actual: {actual:?}");
++                eprintln!();
++                has_failure = true;
++            }
++        }
++
++        if has_failure {
++            panic!("failed comparing targets");
++        }
++    }
++
++    #[test]
++    fn parses_apple_envs_correctly() {
++        assert_eq!(
++            TargetInfo::from_rustc_target("aarch64-apple-ios-macabi").unwrap(),
++            TargetInfo {
++                full_arch: "aarch64",
++                arch: "aarch64",
++                vendor: "apple",
++                os: "ios",
++                env: "macabi",
++                abi: "",
++            }
++        );
++        assert_eq!(
++            TargetInfo::from_rustc_target("aarch64-apple-ios-sim").unwrap(),
++            TargetInfo {
++                full_arch: "aarch64",
++                arch: "aarch64",
++                vendor: "apple",
++                os: "ios",
++                env: "sim",
++                abi: "",
++            }
++        );
++    }
++}

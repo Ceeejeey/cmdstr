@@ -1,3 +1,16 @@
+cmdstr (0.1.6-1~resolute1) resolute; urgency=medium
+
+  * Build for Ubuntu 25.04 Resolute.
+
+ -- Gihan Vimukthi <gihanvimukthi19@gmail.com>  Thu, 21 May 2026 14:10:55 +0530
+
+cmdstr (0.1.6-1) noble; urgency=medium
+
+  * Fix critical export bug, improve TUI help, add stats and export to
+    TUI.
+
+ -- Gihan Vimukthi <gihanvimukthi19@gmail.com>  Thu, 21 May 2026 13:48:00 +0530
+
 cmdstr (0.1.3-1) noble; urgency=medium
 
   [ Gihan Vimukthi ]

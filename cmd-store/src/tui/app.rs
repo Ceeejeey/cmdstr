@@ -51,6 +51,8 @@ pub struct App {
     pub password: String,
     pub show_password_popup: bool,
     pub show_help: bool,
+    pub show_welcome: bool,
+    pub focus_output: bool,
     pub mode_msg: String,
     pending_run: Option<PendingRun>,
     pub list_inner_height: usize,
@@ -83,12 +85,17 @@ impl App {
             password: String::new(),
             show_password_popup: false,
             show_help: false,
+            show_welcome: false,
+            focus_output: false,
             mode_msg: String::new(),
             pending_run: None,
             list_inner_height: 0,
             conn,
         };
         app.load_commands()?;
+        if app.commands.is_empty() {
+            app.show_welcome = true;
+        }
         app.status_msg = format!("{} commands loaded", app.commands.len());
         Ok(app)
     }
@@ -519,9 +526,66 @@ impl App {
         Ok(())
     }
 
+    pub fn copy_to_clipboard(&mut self, text: &str) -> Result<()> {
+        // Try xclip
+        if let Ok(mut child) = std::process::Command::new("xclip")
+            .args(["-selection", "clipboard"])
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+        {
+            use std::io::Write;
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            let _ = child.wait();
+            return Ok(());
+        }
+
+        // Try xsel
+        if let Ok(mut child) = std::process::Command::new("xsel")
+            .args(["--clipboard", "--input"])
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+        {
+            use std::io::Write;
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            let _ = child.wait();
+            return Ok(());
+        }
+
+        // Try wl-copy (Wayland)
+        if let Ok(mut child) = std::process::Command::new("wl-copy")
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+        {
+            use std::io::Write;
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            let _ = child.wait();
+            return Ok(());
+        }
+
+        anyhow::bail!("xclip, xsel, or wl-copy not found")
+    }
+
     fn handle_tool_event(&mut self, ev: Event) -> Result<()> {
         if let Event::Key(KeyEvent { code, kind, modifiers, .. }) = ev {
             if kind != KeyEventKind::Press && kind != KeyEventKind::Repeat {
+                return Ok(());
+            }
+
+            // Dismiss welcome screen on any keypress except quit ones
+            if self.show_welcome {
+                match code {
+                    KeyCode::Char('q') if modifiers == KeyModifiers::NONE => self.should_quit = true,
+                    KeyCode::Char('c') if modifiers == KeyModifiers::CONTROL => self.should_quit = true,
+                    _ => {
+                        self.show_welcome = false;
+                    }
+                }
                 return Ok(());
             }
 
@@ -540,20 +604,67 @@ impl App {
                     self.show_help = false;
                 }
 
-                KeyCode::Char('j') | KeyCode::Down
-                    if self.selected + 1 < self.filtered.len() => {
-                        self.selected += 1;
-                        self.ensure_visible();
+                // Focus Cycling (Tab)
+                KeyCode::Tab => {
+                    self.focus_output = !self.focus_output;
+                    self.status_msg = if self.focus_output {
+                        "Focused: Details/Output panel"
+                    } else {
+                        "Focused: Command List"
+                    }.to_string();
+                }
+
+                // Copy to Clipboard (c)
+                KeyCode::Char('c') if modifiers == KeyModifiers::NONE => {
+                    if let Some(cmd_text) = self.selected_command().map(|c| c.command.clone()) {
+                        match self.copy_to_clipboard(&cmd_text) {
+                            Ok(_) => self.status_msg = "Copied selected command to clipboard".to_string(),
+                            Err(_) => self.status_msg = "Failed to copy: xclip/xsel/wl-copy not found".to_string(),
+                        }
+                    } else {
+                        self.status_msg = "No command selected to copy".to_string();
                     }
-                KeyCode::Char('k') | KeyCode::Up
-                    if self.selected > 0 => {
+                }
+
+                // Output scrolling with Ctrl
+                KeyCode::Up if modifiers == KeyModifiers::CONTROL => self.scroll_output(-1),
+                KeyCode::Down if modifiers == KeyModifiers::CONTROL => self.scroll_output(1),
+
+                // Scroll Up
+                KeyCode::Char('k') | KeyCode::Up => {
+                    if self.focus_output {
+                        self.scroll_output(-1);
+                    } else if self.selected > 0 {
                         self.selected -= 1;
                         self.ensure_visible();
                     }
-                KeyCode::Char('g') => { self.selected = 0; self.list_scroll = 0; }
+                }
+
+                // Scroll Down
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if self.focus_output {
+                        self.scroll_output(1);
+                    } else if self.selected + 1 < self.filtered.len() {
+                        self.selected += 1;
+                        self.ensure_visible();
+                    }
+                }
+
+                KeyCode::Char('g') => {
+                    if self.focus_output {
+                        self.output_scroll = 0;
+                    } else {
+                        self.selected = 0;
+                        self.list_scroll = 0;
+                    }
+                }
                 KeyCode::Char('G') => {
-                    self.selected = self.filtered.len().saturating_sub(1);
-                    self.list_scroll = self.filtered.len().saturating_sub(1);
+                    if self.focus_output {
+                        self.output_scroll = self.output_line_count().saturating_sub(1);
+                    } else {
+                        self.selected = self.filtered.len().saturating_sub(1);
+                        self.list_scroll = self.filtered.len().saturating_sub(1);
+                    }
                 }
 
                 KeyCode::Char('r') => {
@@ -588,6 +699,9 @@ impl App {
                 KeyCode::Char('b') => self.toggle_bookmark()?,
                 KeyCode::Char('d') => self.delete_command()?,
 
+                KeyCode::Char('i') => self.show_stats()?,
+                KeyCode::Char('e') => self.export_history()?,
+
                 KeyCode::Char('S') | KeyCode::Char('U') => {
                     self.sudo_mode = !self.sudo_mode;
                     self.status_msg = if self.sudo_mode {
@@ -600,8 +714,6 @@ impl App {
                 KeyCode::Enter => self.run_selected()?,
 
                 // Output scrolling
-                KeyCode::Up if modifiers == KeyModifiers::CONTROL => self.scroll_output(-1),
-                KeyCode::Down if modifiers == KeyModifiers::CONTROL => self.scroll_output(1),
                 KeyCode::PageUp => self.scroll_output(-5),
                 KeyCode::PageDown => self.scroll_output(5),
 
@@ -698,5 +810,127 @@ impl App {
         } else if self.selected >= self.list_scroll + list_height {
             self.list_scroll = self.selected.saturating_sub(list_height).saturating_add(1);
         }
+    }
+
+    pub fn show_stats(&mut self) -> Result<()> {
+        let total: i64 = self.conn.query_row("SELECT COUNT(*) FROM commands", [], |r| r.get(0))?;
+        let unique: i64 = self.conn.query_row(
+            "SELECT COUNT(DISTINCT command_hash) FROM command_freq", [], |r| r.get(0),
+        )?;
+        let bookmarked: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM annotations WHERE is_bookmark = 1", [], |r| r.get(0),
+        )?;
+        let failed: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM commands WHERE exit_code != 0", [], |r| r.get(0),
+        )?;
+        let today: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM commands WHERE captured_at >= datetime('now', 'start of day')",
+            [], |r| r.get(0),
+        )?;
+        let failure_rate = if total > 0 {
+            (failed as f64 / total as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        let mut out = String::new();
+        out.push_str("📊 cmdstr Statistics\n");
+        out.push_str("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+        out.push_str(&format!("  Total commands:    {}\n", total));
+        out.push_str(&format!("  Unique commands:   {}\n", unique));
+        out.push_str(&format!("  Bookmarked:        {}\n", bookmarked));
+        out.push_str(&format!("  Failure rate:      {:.1}%\n", failure_rate));
+        out.push_str(&format!("  Commands today:    {}\n", today));
+
+        // Top commands
+        let mut stmt = self.conn.prepare(
+            "SELECT command, count FROM command_freq ORDER BY count DESC LIMIT 10",
+        )?;
+        let top_cmds: Vec<(String, i64)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        if !top_cmds.is_empty() {
+            out.push_str("\n  Most frequent:\n");
+            for (cmd, count) in &top_cmds {
+                let display = if cmd.len() > 40 {
+                    format!("{}…", &cmd[..39])
+                } else {
+                    cmd.clone()
+                };
+                out.push_str(&format!("    {:>4}x  {}\n", count, display));
+            }
+        }
+
+        // Top tags
+        let mut stmt = self.conn.prepare(
+            "SELECT t.name, COUNT(ct.command_id) as cnt
+             FROM tags t JOIN command_tags ct ON ct.tag_id = t.id
+             GROUP BY t.id ORDER BY cnt DESC LIMIT 10",
+        )?;
+        let top_tags: Vec<(String, i64)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        if !top_tags.is_empty() {
+            out.push_str("\n  Top tags:\n");
+            for (tag, count) in &top_tags {
+                out.push_str(&format!("    {:<20} {}\n", tag, count));
+            }
+        }
+
+        self.output = out;
+        self.output_scroll = 0;
+        self.focus_output = true;
+        self.status_msg = "Stats loaded ✓".to_string();
+        Ok(())
+    }
+
+    pub fn export_history(&mut self) -> Result<()> {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        let path = format!("{}/cmdstr_export.json", home);
+
+        let mut stmt = self.conn.prepare(
+            "SELECT c.id, c.command, c.cwd, c.exit_code, c.duration_ms,
+                    c.session_id, c.hostname, c.captured_at,
+                    a.note, COALESCE(a.is_bookmark, 0)
+             FROM commands c
+             LEFT JOIN annotations a ON a.command_id = c.id
+             ORDER BY c.captured_at",
+        )?;
+
+        let commands: Vec<serde_json::Value> = stmt
+            .query_map([], |row| {
+                let id: String = row.get(0)?;
+                Ok(serde_json::json!({
+                    "id": id,
+                    "command": row.get::<_, String>(1)?,
+                    "cwd": row.get::<_, String>(2)?,
+                    "exit_code": row.get::<_, i32>(3)?,
+                    "duration_ms": row.get::<_, i64>(4)?,
+                    "session_id": row.get::<_, String>(5)?,
+                    "hostname": row.get::<_, String>(6)?,
+                    "captured_at": row.get::<_, String>(7)?,
+                    "note": row.get::<_, Option<String>>(8)?,
+                    "bookmark": row.get::<_, i32>(9)? != 0,
+                }))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let json = serde_json::to_string_pretty(&commands)?;
+        std::fs::write(&path, &json)?;
+
+        self.output = format!("Exported {} commands to:\n{}\n\nPreview (first 20 lines):\n{}",
+            commands.len(),
+            path,
+            json.lines().take(20).collect::<Vec<_>>().join("\n"),
+        );
+        self.output_scroll = 0;
+        self.focus_output = true;
+        self.status_msg = format!("Exported {} commands ✓", commands.len());
+        Ok(())
     }
 }

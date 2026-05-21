@@ -6,7 +6,18 @@ __cmdstr_session_id="$(uuidgen 2>/dev/null || echo $$-$(date +%s))"
 autoload -Uz add-zsh-hook
 
 cmdstr_preexec() {
-    __cmdstr_cmd="$1"
+    local cmd="$1"
+
+    # Don't capture cmdstr's own commands
+    case "$cmd" in
+        cmdstr\ capture*|__cmdstr_*|_cmdstr_*) return ;;
+    esac
+
+    # Don't capture empty or whitespace-only commands
+    local trimmed="${cmd#"${cmd%%[![:space:]]*}"}"
+    [ -z "$trimmed" ] && return
+
+    __cmdstr_cmd="$cmd"
     __cmdstr_start="$(date +%s%N)"
 }
 
