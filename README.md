@@ -6,6 +6,8 @@
 
 Never lose that complicated `ffmpeg` incantation or that perfect `docker` command again.
 
+![cmdstr TUI Demo](cmdstr_.gif)
+
 ---
 
 ## Features
